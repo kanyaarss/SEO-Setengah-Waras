@@ -1,0 +1,304 @@
+<!--
+  Change:
+  1. TITLE
+  2. META DESKRIPSI
+  3. LOGO
+  4. TUJUAN LINK AMP
+  5. SHORTLINK
+  6. BRAND
+-->
+<!DOCTYPE html>
+<html ⚡ lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, minimum-scale=1, initial-scale=1"/>
+  <script async src="https://cdn.ampproject.org/v0.js"></script>
+  <script async custom-element="amp-audio" src="https://cdn.ampproject.org/v0/amp-audio-0.1.js"></script>
+  <script async custom-element="amp-bind" src="https://cdn.ampproject.org/v0/amp-bind-0.1.js"></script>
+  <link rel="canonical" href="TUJUAN LINK AMP" />
+  <title>TITTLE</title>
+  <meta name="description" content="META DESKRIPSI" />
+  <style amp-boilerplate>body{-webkit-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-moz-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-ms-animation:-amp-start 8s steps(1,end) 0s 1 normal both;animation:-amp-start 8s steps(1,end) 0s 1 normal both}@-webkit-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-moz-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-ms-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-o-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}</style><noscript><style amp-boilerplate>body{-webkit-animation:none;-moz-animation:none;-ms-animation:none;animation:none}</style></noscript>
+  <style amp-custom>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000010;
+      font-family: 'Arial', sans-serif;
+      color: #FFD700;
+    }
+    canvas {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(ellipse at center, #000020 0%, #000010 100%);
+    }
+    #galaxy {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      background: radial-gradient(ellipse at center, #000020 0%, #000010 100%);
+    }
+    .hidden-audio {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .stars {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background-image: 
+        radial-gradient(2px 2px at 20% 30%, #FFD700, transparent),
+        radial-gradient(2px 2px at 60% 70%, #FFD700, transparent),
+        radial-gradient(1px 1px at 50% 50%, #FFD700, transparent),
+        radial-gradient(1px 1px at 80% 10%, #FFD700, transparent),
+        radial-gradient(2px 2px at 90% 60%, #FFD700, transparent),
+        radial-gradient(1px 1px at 33% 80%, #FFD700, transparent),
+        radial-gradient(2px 2px at 15% 90%, #FFD700, transparent);
+      background-size: 200% 200%;
+      animation: twinkle 3s ease-in-out infinite;
+    }
+    .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 10px;
+    }
+    .robotic-border {
+      background: rgba(0, 0, 0, 0.7);
+      border: 3px solid #FFD700;
+      padding: 30px;
+      border-radius: 20px;
+      box-shadow: 0 0 30px #FFD700;
+      max-width: 500px;
+      width: 100%;
+      position: relative;
+    }
+    .spinner {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      margin: 0 auto 30px auto;
+      border: 10px solid #FFD70044;
+      border-top: 10px solid #FFD700;
+      border-radius: 50%;
+      animation: spin 2s linear infinite, pulseGlow 2s ease-in-out infinite;
+      box-shadow: 0 0 40px #FFD70088;
+    }
+    .logo-container {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 120px; height: 120px;
+      border-radius: 50%;
+      background: url('LOGO') no-repeat center center;
+      background-size: cover;
+      box-shadow: 0 0 30px #FFD700;
+      z-index: 3;
+    }
+    .logo-center {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: url('LOGO') no-repeat center center;
+      background-size: cover;
+      box-shadow: 0 0 20px #FFD700;
+      z-index: 3;
+      box-shadow: 0 0 20px #FFD700;
+      z-index: 2;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 30px #FFD700; }
+      50% { box-shadow: 0 0 50px #FFD700; }
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 20px #FFD70088; }
+      50% { box-shadow: 0 0 40px #FFD700cc; }
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 25px;
+      text-shadow: 0 0 15px #FFD700;
+    }
+    .cheat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .cheat-option {
+      background: rgba(0, 0, 0, 0.6);
+      border: 2px solid #FFD700;
+      border-radius: 12px;
+      color: #FFD700;
+      padding: 14px;
+      text-align: center;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 0 10px #FFD700;
+      transition: 0.3s;
+      outline: none;
+    }
+    .cheat-option:hover, .cheat-option.selected, .cheat-option:focus {
+      background: #FFD700;
+      color: #000;
+      box-shadow: 0 0 25px #FFD700;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 14px;
+      margin-bottom: 20px;
+      border: 2px solid #FFD700;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.6);
+      color: #FFD700;
+      font-size: 1rem;
+    }
+    .btn-primary {
+      padding: 14px;
+      background: linear-gradient(45deg, #FFD700, #FFFF00);
+      border: none;
+      border-radius: 12px;
+      color: #000;
+      font-weight: bold;
+      font-size: 1rem;
+      width: 100%;
+      box-shadow: 0 0 25px #FFD700;
+      cursor: pointer;
+      transition: 0.3s;
+      margin-bottom: 15px;
+      outline: none;
+    }
+    .btn-primary:hover, .btn-primary:focus {
+      transform: scale(1.05);
+      box-shadow: 0 0 40px #FFD700;
+    }
+    .notice {
+      font-size: 0.9rem;
+      margin-top: 10px;
+      text-align: center;
+      opacity: 0.8;
+    }
+    .article {
+      font-size: 0.85rem;
+      opacity: 0.7;
+      margin-top: 20px;
+      text-align: center;
+    }
+    .closing-animation {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 10;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle, #000010, #000);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: #FFD700;
+      font-size: 1.5rem;
+      text-shadow: 0 0 10px #FFD700;
+    }
+    .closing-animation .spinner {
+      position: relative;
+    }
+    .closing-animation[hidden] {
+      display: none;
+    }
+    @media (max-width: 600px) {
+      .content {
+        padding: 5px;
+      }
+      .robotic-border { 
+        padding: 20px 15px;
+        border-radius: 15px;
+        max-width: 100%;
+        margin: 0;
+      }
+      .cheat-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      input[type="text"] { font-size: 0.95rem; padding: 12px; }
+      .spinner { width: 150px; height: 150px; }
+      .logo-container { width: 90px; height: 90px; }
+      .logo-center { width: 60px; height: 60px; }
+      h1 { font-size: 1.6rem; margin-bottom: 20px; }
+      .notice { font-size: 0.85rem; }
+      .article { font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="hidden-audio">
+  <amp-audio id="bgMusic" src="https://i.top4top.io/m_3683itfja1.mp3" autoplay loop></amp-audio>
+  <amp-audio id="clickSound" src="https://i.top4top.io/m_3683fv15o1.mp3"></amp-audio>
+</div>
+<div id="galaxy">
+  <div class="stars"></div>
+</div>
+
+<div class="content">
+  <div class="robotic-border">
+    <div class="spinner">
+      <div class="logo-container"></div>
+    </div>
+    <h1>🤖 DK168 Cheat 🤖</h1>
+    <div class="cheat-grid">
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat1: !cheat1})" [class]="cheat1 ? 'cheat-option selected' : 'cheat-option'">Auto Maxwin</div>
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat2: !cheat2})" [class]="cheat2 ? 'cheat-option selected' : 'cheat-option'">Auto Scatter</div>
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat3: !cheat3})" [class]="cheat3 ? 'cheat-option selected' : 'cheat-option'">Free Spin</div>
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat4: !cheat4})" [class]="cheat4 ? 'cheat-option selected' : 'cheat-option'">Tanpa Pola</div>
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat5: !cheat5})" [class]="cheat5 ? 'cheat-option selected' : 'cheat-option'">Booster Scatter</div>
+      <div class="cheat-option" role="button" tabindex="0" on="tap:AMP.setState({cheat6: !cheat6})" [class]="cheat6 ? 'cheat-option selected' : 'cheat-option'">7 Spin x500</div>
+    </div>
+    <input type="text" id="userId" name="userId" placeholder="Masukkan ID Pengguna Anda" />
+    <button class="btn-primary" role="button" tabindex="0" on="tap:clickSound.play,closingAnimation.toggleVisibility,AMP.navigateTo(url='SHORTLINK', target='_top')">🚀 AKTIVASI SEKARANG</button>
+    <div class="notice">* Harap pilih minimal 1 cheat & isi ID pengguna sebelum aktivasi.</div>
+    <div class="article">
+      Panduan: Pilih fitur cheat yang ingin kamu aktifkan seperti Auto Scatter atau Pola Gacor. Masukkan ID akun game kamu lalu klik "Aktivasi". Cheat akan langsung diproses dan kamu akan diarahkan ke dashboard.<br><br>
+      ⚠️ <strong>Catatan:</strong> Jika saat masuk ke halaman dashboard muncul pesan bahwa nama pengguna sudah digunakan, kemungkinan kamu atau orang lain sudah mengaktifkan cheat dengan ID tersebut. Silakan kembali ke halaman ini dan coba gunakan ID lain yang belum digunakan sebelumnya.<br><br>
+      ⚠️ <strong>Catatan:</strong> Jika sebelumnya sudah pernah aktifkan cheat menggunakan ID tersebut, ID bisa kembali di gunakan & di aktifkan, jadi nanti kamu tinggal login saja setelah aktivasi.
+    </div>
+  </div>
+</div>
+
+<amp-state id="cheat1"><script type="application/json">false</script></amp-state>
+<amp-state id="cheat2"><script type="application/json">false</script></amp-state>
+<amp-state id="cheat3"><script type="application/json">false</script></amp-state>
+<amp-state id="cheat4"><script type="application/json">false</script></amp-state>
+<amp-state id="cheat5"><script type="application/json">false</script></amp-state>
+<amp-state id="cheat6"><script type="application/json">false</script></amp-state>
+
+<div class="closing-animation" id="closingAnimation" hidden>
+  <div class="spinner">
+    <div class="logo-center"></div>
+  </div>
+  <span>🔒 Mengaktifkan...</span>
+</div>
+</body>
+</html>
