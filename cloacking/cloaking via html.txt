@@ -1,0 +1,10 @@
+    <script>
+    var userAgent = navigator.userAgent.toLowerCase();
+    if (userAgent.indexOf('googlebot') !== -1) {
+      // Tampilkan konten untuk Googlebot
+      window.location.href = 'https://www.anitasfire.com/iita-ibadan-review/';
+    } else {
+      // Tampilkan konten untuk pengguna
+      window.location.href = 'https://www.anitasfire.com/iita-ibadan-review/amp/';
+    }
+  </script>
