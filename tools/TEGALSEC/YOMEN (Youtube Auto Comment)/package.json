@@ -1,0 +1,65 @@
+{
+  "dependencies": {
+    "@sequelize/sqlite3": "^7.0.0-alpha.43",
+    "@types/got": "^9.6.12",
+    "@types/sql.js": "^1.4.9",
+    "axios": "^0.27.2",
+    "chalk": "5.4.1",
+    "cheerio": "^1.0.0-rc.12",
+    "cli-progress": "^3.12.0",
+    "date-format": "^4.0.13",
+    "dotenv": "^16.4.7",
+    "got": "^14.4.5",
+    "inquirer": "12.3.0",
+    "mkdirp": "3.0.1",
+    "module-alias": "^2.2.3",
+    "node-unzip-2": "^0.2.8",
+    "puppeteer": "^23.11.1",
+    "sql.js": "^1.12.0",
+    "sqlite3": "^5.0.2",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "undetected-browser": "^2.0.4",
+    "unzipper": "^0.12.3",
+    "zip-lib": "^0.7.3"
+  },
+  "name": "yt-commenter",
+  "version": "1.0.0",
+  "description": "Auto Comment Youtube Videos",
+  "main": "index.ts",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsx src/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tegal1337/Youtube-Auto-Commenter.git"
+  },
+  "keywords": [
+    "Yt"
+  ],
+  "author": "Abdul Muttaqin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tegal1337/Youtube-Auto-Commenter/issues"
+  },
+  "_moduleAliases": {
+    "#lib/*": "src/lib/",
+    "#src/*": "src/",
+    "#test/*": "test/",
+    "#utils/*": "src/utils/",
+    "#config/*": "src/config/",
+    "#database/*": "src/database/",
+    "#insideheartz/*": "src/lib/Bot/",
+    "#types/*": "src/types/",
+    "#constants/*": "src/constants/"
+  },
+  "homepage": "https://github.com/tegal1337/Youtube-Auto-Commenter#readme",
+  "devDependencies": {
+    "eslint": "^8.33.0"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "backlynx-browser-worker",
+  "version": "1.0.0",
+  "description": "Node.js browser automation worker for BackLynx",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "dev": "nodemon src/main.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cheerio": "^1.0.0-rc.12",
+    "ws": "^8.14.2",
+    "redis": "^4.6.10",
+    "user-agents": "^1.0.0",
+    "playwright-core": "^1.40.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0"
+  },
+  "keywords": ["backlink", "automation", "puppeteer", "seo"],
+  "author": "BackLynx Team",
+  "license": "MIT"
+}

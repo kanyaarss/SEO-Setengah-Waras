@@ -1,0 +1,43 @@
+{
+  "processing": {
+    "max_concurrent_urls": 1000,
+    "batch_size": 50,
+    "retry_attempts": 3,
+    "timeout_seconds": 30
+  },
+  "browser": {
+    "headless": true,
+    "stealth_mode": true,
+    "user_agent_rotation": true,
+    "screenshot_capture": false,
+    "viewport_width": 1920,
+    "viewport_height": 1080
+  },
+  "proxy": {
+    "rotation_enabled": false,
+    "health_check_interval": 300,
+    "max_failures": 5,
+    "proxy_list_file": "config/proxies.txt"
+  },
+  "ai": {
+    "model": "gpt-3.5-turbo",
+    "max_tokens": 150,
+    "temperature": 0.7,
+    "quality_threshold": 0.8,
+    "fallback_to_templates": true
+  },
+  "output": {
+    "csv_file": "backlynx_results.csv",
+    "log_level": "info",
+    "real_time_logging": true
+  },
+  "anti_detection": {
+    "random_delays": {
+      "min": 1000,
+      "max": 3000
+    },
+    "mouse_simulation": true,
+    "scroll_simulation": true,
+    "typing_simulation": true
+  }
+}

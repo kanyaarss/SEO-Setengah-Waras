@@ -1,0 +1,11 @@
+# Anchor texts for backlinks (one per line)
+SEO Services
+Best SEO
+Professional SEO
+SEO Expert
+Digital Marketing
+Online Marketing
+Marketing Agency
+SEO Company
+Search Engine Optimization
+Web Marketing

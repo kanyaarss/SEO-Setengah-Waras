@@ -1,0 +1,7 @@
+# Proxy list (one per line)
+# Format: http://username:password@proxy:port
+# Examples:
+# http://proxy1.example.com:8080
+# http://user:pass@proxy2.example.com:8080
+# socks5://proxy3.example.com:1080
+# Leave empty if not using proxies

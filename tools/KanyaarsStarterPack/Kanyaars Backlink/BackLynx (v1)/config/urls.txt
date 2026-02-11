@@ -1,0 +1,8 @@
+# Add your target URLs here (one per line)
+# Example URLs for testing:
+https://example.com/blog
+https://wordpress.org
+https://medium.com
+https://blogger.com
+# https://your-target-website.com/page1
+# https://your-target-website.com/page2

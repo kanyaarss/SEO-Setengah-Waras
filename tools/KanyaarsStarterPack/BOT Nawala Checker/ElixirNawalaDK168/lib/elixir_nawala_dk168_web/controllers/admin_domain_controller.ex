@@ -1,0 +1,66 @@
+defmodule ElixirNawalaDK168Web.AdminDomainController do
+  use ElixirNawalaDK168Web, :controller
+
+  alias ElixirNawalaDK168.Monitor
+
+  def create(conn, %{"domain" => params}) do
+    case Monitor.create_domain_from_sflink(params) do
+      {:ok, %{local_domain: local_domain, sflink: sflink}} ->
+        label = sflink.domain || local_domain.name
+
+        conn
+        |> put_flash(:info, "SFLINK OK: #{label} (id: #{sflink.id || "-"})")
+        |> redirect(to: "/admin/dashboard")
+
+      {:error, %Ecto.Changeset{}} ->
+        conn
+        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> redirect(to: "/admin/dashboard")
+
+      {:error, {:http_error, code, message, _body}} ->
+        _ = {code, message}
+        conn
+        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> redirect(to: "/admin/dashboard")
+
+      {:error, {:sflink_error, message, _body}} ->
+        _ = message
+        conn
+        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> redirect(to: "/admin/dashboard")
+
+      {:error, reason} ->
+        _ = reason
+        conn
+        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> redirect(to: "/admin/dashboard")
+    end
+  end
+
+  def delete(conn, %{"id" => id}) do
+    case Integer.parse(id) do
+      {domain_id, _} ->
+        case Monitor.delete_domain_from_sflink(domain_id) do
+          {:ok, %{local_name: name, remote_id: remote_id}} ->
+            conn
+            |> put_flash(:info, "Domain #{name} deleted (SFLINK id: #{remote_id}).")
+            |> redirect(to: "/admin/dashboard")
+
+          {:error, :remote_domain_not_found} ->
+            conn
+            |> put_flash(:error, "Domain tidak ditemukan di SFLINK.")
+            |> redirect(to: "/admin/dashboard")
+
+          {:error, reason} ->
+            conn
+            |> put_flash(:error, "Gagal hapus domain: #{inspect(reason)}")
+            |> redirect(to: "/admin/dashboard")
+        end
+
+      :error ->
+        conn
+        |> put_flash(:error, "ID domain tidak valid.")
+        |> redirect(to: "/admin/dashboard")
+    end
+  end
+end

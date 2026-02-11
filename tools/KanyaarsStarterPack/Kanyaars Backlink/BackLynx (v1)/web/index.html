@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BackLynx v1 - Smart Backlink Injection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .loader {
+            border-top-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <header class="text-center mb-10">
+            <div class="flex justify-center items-center mb-4">
+                <i data-lucide="link" class="w-10 h-10 text-blue-600 mr-3"></i>
+                <h1 class="text-4xl font-bold text-gray-900">BackLynx v1</h1>
+            </div>
+            <p class="text-gray-600 text-lg">Smart Backlink Injection System</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="bg-white rounded-xl shadow-lg p-8">
+            <!-- Upload Section -->
+            <section class="mb-8">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+                    <i data-lucide="upload" class="w-6 h-6 mr-2 text-blue-600"></i>
+                    Upload URLs
+                </h2>
+                
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors" id="dropZone">
+                    <i data-lucide="file-text" class="w-12 h-12 mx-auto text-gray-400 mb-4"></i>
+                    <p class="text-gray-600 mb-2">Drag & drop URLs.txt file here or click to browse</p>
+                    <input type="file" id="fileInput" accept=".txt" class="hidden">
+                    <button onclick="document.getElementById('fileInput').click()" 
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                        Choose File
+                    </button>
+                </div>
+                
+                <div id="fileInfo" class="mt-4 hidden">
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <p class="text-green-800 font-medium">
+                            <i data-lucide="check-circle" class="w-5 h-5 inline mr-2"></i>
+                            <span id="fileName"></span> loaded successfully
+                        </p>
+                        <p class="text-green-600 text-sm mt-1">
+                            <span id="urlCount"></span> URLs found
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Configuration Section -->
+            <section class="mb-8">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+                    <i data-lucide="settings" class="w-6 h-6 mr-2 text-blue-600"></i>
+                    Configuration
+                </h2>
+                
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Target Domain
+                        </label>
+                        <input type="url" id="targetDomain" placeholder="https://yourdomain.com" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <p class="text-xs text-gray-500 mt-1">Domain where backlinks will be placed</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Anchor Text
+                        </label>
+                        <input type="text" id="anchorText" placeholder="SEO Services" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <p class="text-xs text-gray-500 mt-1">Text to be used for backlink anchor</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Action Section -->
+            <section class="mb-8">
+                <div class="flex justify-center">
+                    <button id="startBtn" onclick="startProcessing()" 
+                            class="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition-colors flex items-center text-lg font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        <i data-lucide="play" class="w-5 h-5 mr-2"></i>
+                        Start Processing
+                    </button>
+                </div>
+            </section>
+
+            <!-- Progress Section -->
+            <section id="progressSection" class="mb-8 hidden">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+                    <i data-lucide="activity" class="w-6 h-6 mr-2 text-blue-600"></i>
+                    Processing Progress
+                </h2>
+                
+                <div class="bg-gray-50 rounded-lg p-6 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-sm font-medium text-gray-700">Overall Progress</span>
+                        <span id="progressPercent" class="text-sm font-medium text-blue-600">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-3 mb-4">
+                        <div id="progressBar" class="bg-blue-600 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4 text-center">
+                        <div>
+                            <p class="text-2xl font-bold text-gray-800" id="processedCount">0</p>
+                            <p class="text-sm text-gray-600">Processed</p>
+                        </div>
+                        <div>
+                            <p class="text-2xl font-bold text-green-600" id="successCount">0</p>
+                            <p class="text-sm text-gray-600">Success</p>
+                        </div>
+                        <div>
+                            <p class="text-2xl font-bold text-red-600" id="failedCount">0</p>
+                            <p class="text-sm text-gray-600">Failed</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Terminal Section -->
+                <div class="bg-gray-900 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-white font-semibold flex items-center">
+                            <i data-lucide="terminal" class="w-5 h-5 mr-2"></i>
+                            Live Terminal Logs
+                        </h3>
+                        <div class="flex space-x-2">
+                            <button onclick="stopProcessing()" class="text-red-400 hover:text-white text-sm">
+                                <i data-lucide="octagon-alert" class="w-4 h-4"></i>
+                                Stop
+                            </button>
+                            <button onclick="clearLogs()" class="text-gray-400 hover:text-white text-sm">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                Clear
+                            </button>
+                            <button onclick="toggleAutoScroll()" id="autoScrollBtn" class="text-green-400 hover:text-white text-sm">
+                                <i data-lucide="arrow-down" class="w-4 h-4"></i>
+                                Auto Scroll
+                            </button>
+                        </div>
+                    </div>
+                    <div id="terminal" class="bg-black rounded p-3 h-64 overflow-y-auto font-mono text-xs text-green-400 leading-relaxed">
+                        <div class="text-gray-500">Waiting for logs...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section id="resultsSection" class="hidden">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+                    <i data-lucide="download" class="w-6 h-6 mr-2 text-blue-600"></i>
+                    Results
+                </h2>
+                
+                <div class="bg-green-50 border border-green-200 rounded-lg p-6">
+                    <p class="text-green-800 font-medium mb-4">Processing completed successfully!</p>
+                    <button onclick="downloadCSV()" 
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+                        <i data-lucide="download" class="w-5 h-5 mr-2"></i>
+                        Download CSV Results
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="text-center mt-10 text-gray-600">
+            <p>BackLynx v1.0 - Professional backlink injection system</p>
+        </footer>
+    </div>
+
+    <script>
+        let uploadedURLs = [];
+        let processingData = null;
+        let logEventSource = null;
+        let logIntervalId = null;
+        let autoScroll = true;
+        let isProcessing = false;
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // File upload handling
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-400', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.txt')) {
+                alert('Please upload a .txt file');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const content = e.target.result;
+                const urls = content.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'));
+                
+                if (urls.length === 0) {
+                    alert('No valid URLs found in the file');
+                    return;
+                }
+
+                uploadedURLs = urls;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('urlCount').textContent = urls.length;
+                document.getElementById('fileInfo').classList.remove('hidden');
+                
+                // Re-initialize icons for the new content
+                lucide.createIcons();
+            };
+            reader.readAsText(file);
+        }
+
+        async function startProcessing() {
+            if (uploadedURLs.length === 0) {
+                alert('Please upload URLs file first');
+                return;
+            }
+
+            const targetDomain = document.getElementById('targetDomain').value.trim();
+            const anchorText = document.getElementById('anchorText').value.trim();
+
+            if (!targetDomain || !anchorText) {
+                alert('Please fill in both target domain and anchor text');
+                return;
+            }
+
+            // Show progress section
+            document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 loader"></i>Processing...';
+            lucide.createIcons();
+
+            // Clear terminal and start logs
+            clearTerminal();
+            startLogStream();
+            isProcessing = true;
+
+            try {
+                const response = await fetch('/api/v1/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        urls: uploadedURLs,
+                        targetDomain: targetDomain,
+                        anchorText: anchorText
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Processing failed');
+                }
+
+                // Start polling for progress
+                pollProgress();
+
+            } catch (error) {
+                console.error('Error:', error);
+                addLogEntry('ERROR: ' + error.message, 'error');
+                alert('Failed to start processing');
+                resetUI();
+            }
+        }
+
+        function startLogStream() {
+            // Simple polling approach for logs
+            addLogEntry('Starting log monitoring...', 'info');
+            
+            let lastLogCount = 0;
+            
+            // Poll for logs every 2 seconds
+            const logInterval = setInterval(() => {
+                if (!isProcessing) {
+                    clearInterval(logInterval);
+                    return;
+                }
+                
+                fetch('/api/v1/logs')
+                    .then(response => response.json())
+                    .then(data => {
+                        // Display new logs only
+                        if (data.logs && data.logs.length > lastLogCount) {
+                            for (let i = lastLogCount; i < data.logs.length; i++) {
+                                addLogEntry(data.logs[i], 'info');
+                            }
+                            lastLogCount = data.logs.length;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching logs:', error);
+                    });
+            }, 2000);
+            logIntervalId = logInterval;
+            
+            // Add initial logs
+            addLogEntry('Log monitoring started', 'success');
+            addLogEntry('Monitoring processing progress...', 'info');
+        }
+
+        function addLogEntry(message, type = 'info') {
+            const terminal = document.getElementById('terminal');
+            const timestamp = new Date().toLocaleTimeString();
+            
+            let colorClass = 'text-green-400';
+            if (type === 'error') colorClass = 'text-red-400';
+            if (type === 'warning') colorClass = 'text-yellow-400';
+            if (type === 'success') colorClass = 'text-blue-400';
+            
+            const logLine = document.createElement('div');
+            logLine.className = colorClass;
+            logLine.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> ${message}`;
+            
+            terminal.appendChild(logLine);
+            
+            // Auto scroll to bottom if enabled
+            if (autoScroll) {
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+            
+            // Limit terminal lines to prevent memory issues
+            const lines = terminal.children;
+            if (lines.length > 500) {
+                terminal.removeChild(lines[0]);
+            }
+        }
+
+        function clearTerminal() {
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML = '<div class="text-gray-500">Terminal cleared...</div>';
+        }
+
+        function clearLogs() {
+            clearTerminal();
+            addLogEntry('Terminal cleared by user', 'info');
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            const btn = document.getElementById('autoScrollBtn');
+            
+            if (autoScroll) {
+                btn.classList.remove('text-gray-400');
+                btn.classList.add('text-green-400');
+                addLogEntry('Auto-scroll enabled', 'info');
+            } else {
+                btn.classList.remove('text-green-400');
+                btn.classList.add('text-gray-400');
+                addLogEntry('Auto-scroll disabled', 'info');
+            }
+            
+            lucide.createIcons();
+        }
+
+        async function pollProgress() {
+            try {
+                const response = await fetch('/api/v1/status');
+                const data = await response.json();
+
+                updateProgress(data);
+
+                if (data.status === 'completed') {
+                    showResults();
+                } else {
+                    setTimeout(pollProgress, 2000); // Poll every 2 seconds
+                }
+            } catch (error) {
+                console.error('Error polling progress:', error);
+                setTimeout(pollProgress, 2000);
+            }
+        }
+
+        function updateProgress(data) {
+            const total = uploadedURLs.length;
+            const processed = data.processed || 0;
+            const success = data.success || 0;
+            const failed = data.failed || 0;
+            
+            const percent = Math.round((processed / total) * 100);
+            
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('processedCount').textContent = processed;
+            document.getElementById('successCount').textContent = success;
+            document.getElementById('failedCount').textContent = failed;
+        }
+
+        function showResults() {
+            isProcessing = false;
+            if (logIntervalId) {
+                clearInterval(logIntervalId);
+                logIntervalId = null;
+            }
+            if (logEventSource) {
+                logEventSource.close();
+                logEventSource = null;
+            }
+            
+            addLogEntry('Processing completed successfully!', 'success');
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('resultsSection').classList.remove('hidden');
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i>Start Processing';
+            lucide.createIcons();
+        }
+
+        function downloadCSV() {
+            window.open('/api/v1/export', '_blank');
+        }
+
+        function resetUI() {
+            isProcessing = false;
+            if (logIntervalId) {
+                clearInterval(logIntervalId);
+                logIntervalId = null;
+            }
+            if (logEventSource) {
+                logEventSource.close();
+                logEventSource = null;
+            }
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i>Start Processing';
+            lucide.createIcons();
+        }
+
+        async function stopProcessing() {
+            if (!isProcessing) {
+                return;
+            }
+
+            isProcessing = false;
+            if (logIntervalId) {
+                clearInterval(logIntervalId);
+                logIntervalId = null;
+            }
+            if (logEventSource) {
+                logEventSource.close();
+                logEventSource = null;
+            }
+
+            addLogEntry('Stopping all workers and clearing cache...', 'warning');
+
+            try {
+                const response = await fetch('/api/v1/stop', { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error('Failed to stop processing');
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'backlynx_results.csv';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+                addLogEntry('Stopped. Results downloaded and cache cleared.', 'success');
+            } catch (error) {
+                addLogEntry('STOP failed: ' + error.message, 'error');
+            }
+
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i>Start Processing';
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>
