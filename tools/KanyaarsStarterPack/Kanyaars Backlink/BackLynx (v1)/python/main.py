@@ -1,6 +1,5 @@
 import os
 import sys
-import asyncio
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,10 +7,66 @@ from pydantic import BaseModel
 import uvicorn
 from redis import asyncio as redis
 
-# Temporarily disable complex AI modules for deployment
-# from src.ai.content_generator import ContentGenerator
-# from src.nlp.processor import NLPProcessor
-# from src.quality.assessor import QualityAssessor
+class SimpleContentGenerator:
+    """Fallback generator to keep API functional without external AI providers."""
+    def __init__(self):
+        self._count = 0
+
+    async def generate(self, url: str, anchor: str, target_domain: str, context: str = "") -> str:
+        self._count += 1
+        context_line = f" Context: {context[:200]}" if context else ""
+        return (
+            f"Great insights on this topic. Recommended resource: "
+            f"<a href=\"{target_domain}\">{anchor}</a>.{context_line}"
+        )
+
+    async def get_generation_count(self) -> int:
+        return self._count
+
+
+class SimpleNLPProcessor:
+    def __init__(self):
+        self._count = 0
+
+    async def analyze(self, content: str) -> dict:
+        self._count += 1
+        words = [w for w in content.split() if w.strip()]
+        keywords = sorted(set(w.lower().strip(".,!?") for w in words if len(w) > 4))[:10]
+        return {
+            "sentiment": "neutral",
+            "language": "en",
+            "keywords": keywords,
+            "word_count": len(words),
+        }
+
+    async def get_processed_count(self) -> int:
+        return self._count
+
+
+class SimpleQualityAssessor:
+    def __init__(self):
+        self._count = 0
+
+    async def assess_quality(self, content: str) -> float:
+        self._count += 1
+        length_score = min(len(content) / 240.0, 1.0)
+        link_bonus = 0.2 if "<a href=" in content else 0.0
+        return round(min(1.0, 0.5 + length_score * 0.4 + link_bonus), 2)
+
+    async def assess_relevance(self, content: str, context: str) -> float:
+        if not context:
+            return 0.7
+        overlap = sum(1 for token in context.lower().split() if token in content.lower())
+        return round(min(1.0, 0.4 + overlap / 50.0), 2)
+
+    async def assess_seo(self, content: str, anchor: str, target_domain: str) -> float:
+        anchor_ok = anchor.lower() in content.lower()
+        domain_ok = target_domain.lower() in content.lower()
+        score = 0.4 + (0.3 if anchor_ok else 0.0) + (0.3 if domain_ok else 0.0)
+        return round(score, 2)
+
+    async def get_assessment_count(self) -> int:
+        return self._count
 
 # Configure logging
 logging.basicConfig(
@@ -74,11 +129,11 @@ async def initialize_services():
         await redis_client.ping()
         logger.info("Connected to Redis")
 
-        # Simplified AI services for deployment
-        content_generator = None  # Disabled for now
-        nlp_processor = None     # Disabled for now
-        quality_assessor = None   # Disabled for now
-        logger.info("AI services disabled for deployment")
+        # Keep service functional even when advanced AI modules are unavailable.
+        content_generator = SimpleContentGenerator()
+        nlp_processor = SimpleNLPProcessor()
+        quality_assessor = SimpleQualityAssessor()
+        logger.info("Initialized fallback AI service components")
 
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
@@ -112,9 +167,9 @@ async def health_check():
     
     services = {
         "redis": "healthy",
-        "content_generator": "healthy",
-        "nlp_processor": "healthy",
-        "quality_assessor": "healthy"
+        "content_generator": "healthy" if content_generator else "unhealthy",
+        "nlp_processor": "healthy" if nlp_processor else "unhealthy",
+        "quality_assessor": "healthy" if quality_assessor else "unhealthy"
     }
 
     # Check Redis connection
@@ -238,9 +293,9 @@ async def get_stats():
     """Get service statistics"""
     try:
         stats = {
-            "content_generated": await content_generator.get_generation_count(),
-            "nlp_processed": await nlp_processor.get_processed_count(),
-            "quality_assessed": await quality_assessor.get_assessment_count(),
+            "content_generated": await content_generator.get_generation_count() if content_generator else 0,
+            "nlp_processed": await nlp_processor.get_processed_count() if nlp_processor else 0,
+            "quality_assessed": await quality_assessor.get_assessment_count() if quality_assessor else 0,
             "redis_connected": redis_client is not None
         }
 

@@ -22,7 +22,8 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
      |> assign(:page_title, "Admin Dashboard")
      |> assign_domains(domains)
      |> assign(:settings, settings)
-     |> assign(:domain_form, to_form(%{"name" => ""}, as: :domain))
+     |> assign(:add_domain_profiles, [])
+     |> assign(:domain_form, to_form(%{"name" => "", "profile_id" => ""}, as: :domain))
      |> assign(:settings_form, to_form(settings, as: :settings))
      |> assign(:test_message, "[ElixirNawalaDK168] Test notifikasi Telegram")
      |> assign(:last_cycle_info, nil)
@@ -31,6 +32,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
      |> assign(:remote_statuses, %{})
      |> assign(:sflink_profile, nil)
      |> assign(:sflink_profiles, [])
+     |> assign(:max_sflink_profiles, Monitor.max_sflink_profiles())
      |> assign(:list_domain_query, "")
      |> assign(:sflink_profile_form, to_form(%{"name" => "", "api_token" => ""}, as: :sflink_profile))
      |> assign(:status_clock, DateTime.utc_now())
@@ -68,10 +70,21 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
           |> live_check_all_remote_domains()
           |> assign_next_refresh_seconds()
 
+        :add_domain ->
+          socket
+          |> assign_add_domain_profiles()
+
         :profile ->
           socket
           |> assign_sflink_profile()
           |> assign(:sflink_profiles, Monitor.list_sflink_profiles())
+
+        :telegram ->
+          settings = Monitor.list_settings()
+
+          socket
+          |> assign(:settings, settings)
+          |> assign(:settings_form, to_form(settings, as: :settings))
 
         _ ->
           socket
@@ -85,18 +98,32 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
     case Monitor.create_domain_from_sflink(params) do
       {:ok, %{local_domain: local_domain, sflink: sflink}} ->
         domains = Monitor.list_domains()
+        socket = assign_add_domain_profiles(socket)
+        default_profile_id = default_add_domain_profile_id(socket.assigns.add_domain_profiles)
 
         {:noreply,
          socket
          |> put_flash(:info, "SFLINK OK: #{sflink.domain || local_domain.name} (id: #{sflink.id || "-"})")
          |> assign_domains(domains)
-         |> assign(:domain_form, to_form(%{"name" => ""}, as: :domain))}
+         |> assign(:domain_form, to_form(%{"name" => "", "profile_id" => default_profile_id}, as: :domain))}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply,
          socket
          |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
          |> assign(:domain_form, to_form(changeset, as: :domain))}
+
+      {:error, :missing_profile_selection} ->
+        {:noreply, put_flash(socket, :error, "Pilih User Profile terlebih dahulu.")}
+
+      {:error, :invalid_profile_selection} ->
+        {:noreply, put_flash(socket, :error, "User Profile tidak valid.")}
+
+      {:error, :inactive_profile} ->
+        {:noreply, put_flash(socket, :error, "User Profile tidak aktif.")}
+
+      {:error, :profile_not_found} ->
+        {:noreply, put_flash(socket, :error, "User Profile tidak ditemukan.")}
 
       {:error, reason} ->
         _ = format_reason(reason)
@@ -158,9 +185,11 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
     {:noreply, assign(socket, :list_domain_query, String.trim(q || ""))}
   end
 
-  def handle_event("delete_remote_domain", %{"id" => id}, socket) do
+  def handle_event("delete_remote_domain", %{"id" => id} = params, socket) do
+    profile_id_param = Map.get(params, "profile_id")
+
     with {remote_id, _} <- Integer.parse(id),
-         {:ok, _result} <- Monitor.delete_remote_domain(remote_id) do
+         {:ok, _result} <- delete_remote_domain_with_profile(remote_id, profile_id_param) do
       {:noreply,
        socket
        |> put_flash(:info, "Domain remote id #{remote_id} berhasil dihapus.")
@@ -175,10 +204,13 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
     end
   end
 
-  def handle_event("live_check_remote_domain", %{"id" => id}, socket) do
+  def handle_event("live_check_remote_domain", %{"id" => id} = params, socket) do
+    profile_id_param = Map.get(params, "profile_id")
+    row_key = Map.get(params, "key", id)
+
     with {remote_id, _} <- Integer.parse(id),
-         {:ok, result} <- Monitor.live_check_remote_domain_status(remote_id) do
-      statuses = Map.put(socket.assigns.remote_statuses, remote_id, result.status)
+         {:ok, result} <- live_check_remote_domain_with_profile(remote_id, profile_id_param) do
+      statuses = Map.put(socket.assigns.remote_statuses, row_key, result.status)
 
       {:noreply,
        socket
@@ -195,18 +227,35 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
       settings
       |> Map.put("sflink_base_url", "https://app.sflink.id")
       |> Map.put_new("telegram_notifications_enabled", "false")
+      |> Map.put_new("telegram_group_notifications_enabled", "false")
+      |> Map.put_new("telegram_private_notifications_enabled", "false")
       |> Map.update!("telegram_notifications_enabled", fn
         "true" -> "true"
         _ -> "false"
       end)
+      |> Map.update!("telegram_group_notifications_enabled", fn
+        "true" -> "true"
+        _ -> "false"
+      end)
+      |> Map.update!("telegram_private_notifications_enabled", fn
+        "true" -> "true"
+        _ -> "false"
+      end)
+      |> Map.update("telegram_bot_token", "", &String.trim(to_string(&1)))
+      |> Map.update("telegram_group_chat_id", "", &String.trim(to_string(&1)))
+      |> Map.update("telegram_private_chat_id", "", &String.trim(to_string(&1)))
 
     Monitor.upsert_settings(normalized)
 
     updated_settings = Monitor.list_settings()
+    info_message =
+      if socket.assigns.current_page == :telegram,
+        do: "Pengaturan Telegram berhasil disimpan.",
+        else: "API Token berhasil tersimpan."
 
     socket =
       socket
-      |> put_flash(:info, "API Token berhasil tersimpan.")
+      |> put_flash(:info, info_message)
       |> assign(:settings, updated_settings)
       |> assign(:settings_form, to_form(updated_settings, as: :settings))
 
@@ -243,10 +292,15 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   def handle_event("add_sflink_profile", %{"sflink_profile" => params}, socket) do
     case Monitor.create_sflink_profile(params) do
       {:ok, _profile} ->
+        settings = Monitor.list_settings()
+
         {:noreply,
          socket
          |> put_flash(:info, "Profile SFLINK berhasil ditambahkan.")
+         |> assign(:settings, settings)
+         |> assign(:settings_form, to_form(settings, as: :settings))
          |> assign(:sflink_profiles, Monitor.list_sflink_profiles())
+         |> assign_sflink_profile()
          |> assign(:sflink_profile_form, to_form(%{"name" => "", "api_token" => ""}, as: :sflink_profile))}
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -255,8 +309,13 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
          |> put_flash(:error, "Gagal menambahkan profile SFLINK.")
          |> assign(:sflink_profile_form, to_form(changeset, as: :sflink_profile))}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal menambahkan profile: #{format_reason(reason)}")}
+      {:error, :token_limit} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Maksimal 10 profile SFLINK per user. Hapus profile lama untuk menambah profile baru.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR 911 SILAHKAN HUBUNGI RAKA")}
     end
   end
 
@@ -428,13 +487,13 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
             </div>
           </div>
 
-          <a class={menu_class(false)} href="#settings">
+          <.link class={menu_class(@current_page == :telegram)} href="/admin/telegram">
             <span class="menu-arrow blank"></span>
             <span class="menu-icon">
               <.nav_icon name="telegram" />
             </span>
             <span class="menu-label">Telegram</span>
-          </a>
+          </.link>
 
           <div class={["menu-expand", @admin_menu_open && "open"]} data-pop-title="Admin">
             <button type="button" class={menu_class(@current_page == :profile)} phx-click="toggle_admin_menu">
@@ -468,15 +527,14 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
             <section id="overview" class="maintenance-card maintenance-card-centered">
               <h1 class="admin-title beta-title">
                 <span class="beta-main">ELIXIR NAWALA</span>
-                <small class="beta-sub">(BETA VERSION)</small>
+                <small class="beta-sub">(Version 1)</small>
               </h1>
               <p class="admin-subtitle">Wait next maintenance for using:</p>
               <ol class="admin-subtitle" style="margin-top: 0.6rem; padding-left: 1.2rem; line-height: 1.7;">
                 <li>Notification Web UI.</li>
-                <li>Telegram Bot.</li>
-                <li>Multi SFLINK API Token (for checking a lot of domain).</li>
                 <li>Admin Panel.</li>
                 <li>Application for mobile phone.</li>
+                <li>Fixing Telegram Bot issued (support private chat, not spamming group chat).</li>
               </ol>
               <p class="maintenance-footnote">Contribute to SEO_Setengah_Waras.</p>
             </section>
@@ -519,6 +577,27 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                 <article class="add-domain-form-card">
                   <h3>Form Tambah Domain</h3>
                   <.form for={@domain_form} action="/admin/domains" method="post" phx-submit="create_domain">
+                    <label for="add-domain-profile">User Profile</label>
+                    <select
+                      id="add-domain-profile"
+                      name="domain[profile_id]"
+                      class="add-domain-profile-select"
+                      required
+                      disabled={@add_domain_profiles == []}
+                    >
+                      <option value="">Pilih user profile</option>
+                      <option
+                        :for={profile <- @add_domain_profiles}
+                        value={profile.id}
+                        selected={to_string(@domain_form[:profile_id].value) == to_string(profile.id)}
+                      >
+                        {profile_option_label(profile)}
+                      </option>
+                    </select>
+                    <p :if={add_domain_quota_label(@add_domain_profiles, @domain_form[:profile_id].value)} class="add-domain-profile-badge">
+                      {add_domain_quota_label(@add_domain_profiles, @domain_form[:profile_id].value)}
+                    </p>
+
                     <label for="add-domain-input">Nama Domain</label>
                     <input
                       id="add-domain-input"
@@ -527,11 +606,15 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                       value={@domain_form[:name].value}
                       placeholder="contoh: example.com"
                       autocomplete="off"
+                      disabled={@add_domain_profiles == []}
                       required
                     />
                     <p class="form-hint">Gunakan format domain tanpa http/https untuk validasi yang lebih akurat.</p>
+                    <p :if={@add_domain_profiles == []} class="form-hint">
+                      Tidak ada user profile dengan kuota domain tersedia.
+                    </p>
                     <div class="actions">
-                      <button type="submit">
+                      <button type="submit" disabled={@add_domain_profiles == []}>
                         <.status_icon name="check" /> Tambahkan Domain
                       </button>
                     </div>
@@ -609,7 +692,13 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                 </div>
 
                 <div>
-                  <button class="inline-action" phx-click="live_check_remote_domain" phx-value-id={rd.id}>
+                  <button
+                    class="inline-action"
+                    phx-click="live_check_remote_domain"
+                    phx-value-id={rd.id}
+                    phx-value-profile_id={rd.source_profile_id}
+                    phx-value-key={remote_domain_key(rd)}
+                  >
                     <.status_icon name="link" /> Live Check
                   </button>
                 </div>
@@ -646,6 +735,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                   <thead>
                     <tr>
                       <th>Remote ID</th>
+                      <th>Profile</th>
                       <th>Domain</th>
                       <th>Status</th>
                       <th class="action-col">Action</th>
@@ -654,6 +744,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                   <tbody>
                     <tr :for={rd <- filtered_remote_domains(@remote_domains, @list_domain_query)}>
                       <td>{rd.id}</td>
+                      <td>{rd.source_profile_name || "Default"}</td>
                       <td>{rd.domain}</td>
                       <td>
                         <span class={"badge " <> check_status_class(rd, @remote_statuses)}>
@@ -661,14 +752,90 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                         </span>
                       </td>
                       <td class="action-col">
-                        <button phx-click="delete_remote_domain" phx-value-id={rd.id}>Delete</button>
+                        <button phx-click="delete_remote_domain" phx-value-id={rd.id} phx-value-profile_id={rd.source_profile_id}>Delete</button>
                       </td>
                     </tr>
                     <tr :if={filtered_remote_domains(@remote_domains, @list_domain_query) == []}>
-                      <td colspan="4">Domain tidak ditemukan.</td>
+                      <td colspan="5">Domain tidak ditemukan.</td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          <% end %>
+
+          <%= if @current_page == :telegram do %>
+            <section id="telegram-settings" class="card-dark">
+              <div class="actions" style="margin-top: 0;">
+                <h2 style="margin: 0;">Telegram Bot</h2>
+              </div>
+
+              <div class="admin-grid profile-grid" style="margin-top: 0.85rem;">
+                <article class="card-dark">
+                  <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">Konfigurasi</h3>
+                  <.form for={@settings_form} phx-submit="save_settings">
+                    <label>Telegram Bot Token</label>
+                    <input
+                      type="password"
+                      name="settings[telegram_bot_token]"
+                      value={@settings["telegram_bot_token"]}
+                      placeholder="123456789:AA..."
+                      autocomplete="off"
+                    />
+
+                    <label>Group Chat ID</label>
+                    <input
+                      type="text"
+                      name="settings[telegram_group_chat_id]"
+                      value={@settings["telegram_group_chat_id"]}
+                      placeholder="-100xxxxxxxxxx"
+                      autocomplete="off"
+                    />
+
+                    <label>Private Chat ID</label>
+                    <input
+                      type="text"
+                      name="settings[telegram_private_chat_id]"
+                      value={@settings["telegram_private_chat_id"]}
+                      placeholder="123456789"
+                      autocomplete="off"
+                    />
+
+                    <label class="checkbox-label">
+                      <input type="checkbox" name="settings[telegram_notifications_enabled]" value="true" checked={@settings["telegram_notifications_enabled"] == "true"} />
+                      Aktifkan Notifikasi Telegram
+                    </label>
+
+                    <label class="checkbox-label">
+                      <input type="checkbox" name="settings[telegram_group_notifications_enabled]" value="true" checked={@settings["telegram_group_notifications_enabled"] == "true"} />
+                      Aktifkan Notifikasi Group
+                    </label>
+
+                    <label class="checkbox-label">
+                      <input type="checkbox" name="settings[telegram_private_notifications_enabled]" value="true" checked={@settings["telegram_private_notifications_enabled"] == "true"} />
+                      Aktifkan Notifikasi Private
+                    </label>
+
+                    <div class="actions">
+                      <button type="submit">Simpan Telegram</button>
+                    </div>
+                  </.form>
+                </article>
+
+                <article class="card-dark">
+                  <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">Tes Notifikasi</h3>
+                  <p class="admin-subtitle">Gunakan tombol di bawah untuk test kirim pesan ke channel Telegram.</p>
+                  <div class="actions">
+                    <button type="button" phx-click="test_group">Test Group</button>
+                    <button type="button" phx-click="test_private">Test Private</button>
+                  </div>
+                  <p class="admin-subtitle" style="margin-top: 0.9rem;">
+                    Notifikasi ringkasan dikirim otomatis setiap 5 menit berisi seluruh domain + waktu check.
+                  </p>
+                  <p class="admin-subtitle" style="margin-top: 0.4rem;">
+                    Notifikasi live dikirim saat domain terdeteksi BLOCKED atau ERROR.
+                  </p>
+                </article>
               </div>
             </section>
           <% end %>
@@ -679,64 +846,66 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                 <h2 style="margin: 0;">Profile Overview</h2>
               </div>
 
-              <div class="admin-grid profile-grid" style="margin-top: 0.85rem;">
-                <article class={["card-dark", if(blank_token?(@settings["sflink_api_token"]), do: "profile-user-blur", else: nil)]}>
-                  <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">User Profile</h3>
-                  <%= if @sflink_profile do %>
+              <%= if @sflink_profiles == [] do %>
+                <div class="admin-grid profile-grid" style="margin-top: 0.85rem;">
+                  <article class="card-dark profile-user-blur">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">User Profile</h3>
+                    <p class="admin-subtitle">Diperlukan minimal 1 SFLINK API Token untuk menjalankan program, silahkan tambahkan API Token.</p>
+                  </article>
+                  <article class="card-dark">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">SFLINK API Token</h3>
+                    <p class="admin-subtitle">Belum ada token tersimpan.</p>
+                  </article>
+                </div>
+              <% else %>
+                <div :for={profile <- @sflink_profiles} class="admin-grid profile-grid" style="margin-top: 0.85rem;">
+                  <article class="card-dark">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">User Profile</h3>
                     <table>
                       <tbody>
                         <tr>
-                          <th>Name</th>
-                          <td>{profile_field(@sflink_profile.user, ["name", "full_name", "username"])}</td>
+                          <th>Username</th>
+                          <td>{profile.name}</td>
                         </tr>
                         <tr>
                           <th>Email</th>
-                          <td>{profile_field(@sflink_profile.user, ["email"])}</td>
+                          <td>{profile.email || "-"}</td>
                         </tr>
                         <tr>
-                          <th>User Type</th>
-                          <td>{profile_field(@sflink_profile.user, ["type", "plan", "plan_name", "subscription_plan"])}</td>
-                        </tr>
-                        <tr>
-                          <th>Total Domain</th>
-                          <td>{stat_field(@sflink_profile.stats, ["total_domains", "domains_total"])}</td>
-                        </tr>
-                        <tr>
-                          <th>Domain Limit</th>
+                          <th>Status</th>
                           <td>
-                            {nested_field(@sflink_profile.raw, ["data", "limits", "domains_remaining"], "0")} / {nested_field(@sflink_profile.raw, ["data", "limits", "max_domains"], "0")}
+                            <span class={if profile.active, do: "badge badge-green", else: "badge badge-gray"}>
+                              {if profile.active, do: "Active", else: "Inactive"}
+                            </span>
                           </td>
                         </tr>
                       </tbody>
                     </table>
-                  <% else %>
-                    <p class="admin-subtitle">Diperlukan minimal 1 SFLINK API Token untuk menjalankan program, silahkan tambahkan API Token.</p>
-                  <% end %>
-                </article>
-                <article id="profile-settings" class="card-dark">
-                  <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">SFLINK API Token</h3>
-                  <.form for={@settings_form} phx-submit="save_settings">
-                    <label>SFLINK API Token</label>
+                  </article>
+                  <article class="card-dark">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #f5f9ff;">SFLINK API Token</h3>
+                    <label>API Token</label>
                     <input
                       type="password"
-                      name="settings[sflink_api_token]"
-                      value={@settings["sflink_api_token"]}
+                      value={profile.api_token}
                       placeholder="sf_xxxxx"
                       autocomplete="off"
+                      readonly
                     />
 
                     <div class="actions">
-                      <button type="submit">Save API Token</button>
-                      <button type="button" phx-click="clear_sflink_token">Hapus API Token</button>
+                      <button type="button" phx-click="activate_sflink_profile" phx-value-id={profile.id}>Save API Token</button>
+                      <button type="button" phx-click="delete_sflink_profile" phx-value-id={profile.id}>Hapus API Token</button>
                     </div>
-                  </.form>
-                </article>
-              </div>
+                  </article>
+                </div>
+              <% end %>
             </section>
 
             <section id="profile-management" class="card-dark" style="margin-top: 1rem;">
               <div class="actions" style="margin-top: 0;">
                 <h2 style="margin: 0;">Tambah Profile</h2>
+                <span class="badge badge-blue">{length(@sflink_profiles)}/{@max_sflink_profiles}</span>
               </div>
 
               <div class="admin-grid profile-grid" style="margin-top: 0.85rem;">
@@ -757,11 +926,15 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                       value={@sflink_profile_form[:api_token].value}
                       placeholder="sf_xxxxx"
                       autocomplete="off"
+                      disabled={length(@sflink_profiles) >= @max_sflink_profiles}
                       required
                     />
+                    <p :if={length(@sflink_profiles) >= @max_sflink_profiles} class="admin-subtitle" style="margin: 0.5rem 0 0;">
+                      Batas maksimal 10 profile sudah tercapai.
+                    </p>
 
                     <div class="actions">
-                      <button type="submit">Tambah Profile</button>
+                      <button type="submit" disabled={length(@sflink_profiles) >= @max_sflink_profiles}>Tambah Profile</button>
                     </div>
                   </.form>
                 </article>
@@ -806,12 +979,14 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   defp page_from_action(:add_domain), do: :add_domain
   defp page_from_action(:list_domain), do: :list_domain
   defp page_from_action(:status_domain), do: :status_domain
+  defp page_from_action(:telegram), do: :telegram
   defp page_from_action(:profile), do: :profile
   defp page_from_action(_), do: :home
 
   defp page_title(:add_domain), do: "Add Domain"
   defp page_title(:list_domain), do: "List Domain"
   defp page_title(:status_domain), do: "Domain Status"
+  defp page_title(:telegram), do: "Telegram"
   defp page_title(:profile), do: "Profile"
   defp page_title(:home), do: "Admin Home"
 
@@ -897,11 +1072,9 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
     """
   end
 
-  defp format_reason({:http_error, 401, message, _body}) do
-    if String.contains?(to_string(message), "API key is required"),
-      do: "TIDAK ADA API TOKEN YANG TERDETEKSI",
-      else: "HTTP 401 - #{message}"
-  end
+  defp format_reason(:missing_sflink_token), do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
+  defp format_reason({:http_error, code, _message, _body}) when code in [401, 403],
+    do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
 
   defp format_reason({:http_error, code, message, _body}), do: "HTTP #{code} - #{message}"
   defp format_reason({:sflink_error, message, _body}), do: message
@@ -956,7 +1129,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   end
 
   defp normalized_domain_status(rd, remote_statuses) do
-    Map.get(remote_statuses, rd.id, rd.status || "unknown")
+    Map.get(remote_statuses, remote_domain_key(rd), rd.status || "unknown")
     |> to_string()
     |> String.downcase()
   end
@@ -1099,8 +1272,8 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   defp live_check_all_remote_domains(socket) do
     statuses =
       Enum.reduce(socket.assigns.remote_domains, socket.assigns.remote_statuses, fn rd, acc ->
-        case Monitor.live_check_remote_domain_status(rd.id) do
-          {:ok, result} -> Map.put(acc, rd.id, result.status)
+        case live_check_remote_domain_with_profile(rd.id, rd.source_profile_id) do
+          {:ok, result} -> Map.put(acc, remote_domain_key(rd), result.status)
           _ -> acc
         end
       end)
@@ -1113,19 +1286,61 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
     "#{String.pad_leading(Integer.to_string(div(sec, 60)), 2, "0")}:#{String.pad_leading(Integer.to_string(rem(sec, 60)), 2, "0")}"
   end
 
+  defp remote_domain_key(rd) when is_map(rd) do
+    Map.get(rd, :domain_key) || "#{Map.get(rd, :source_profile_id, "default")}:#{Map.get(rd, :id, "unknown")}"
+  end
+
+  defp live_check_remote_domain_with_profile(remote_id, nil),
+    do: Monitor.live_check_remote_domain_status(remote_id)
+
+  defp live_check_remote_domain_with_profile(remote_id, profile_id) when is_integer(profile_id),
+    do: Monitor.live_check_remote_domain_status(remote_id, profile_id)
+
+  defp live_check_remote_domain_with_profile(remote_id, profile_id) when is_binary(profile_id) do
+    case Integer.parse(profile_id) do
+      {parsed, _} -> Monitor.live_check_remote_domain_status(remote_id, parsed)
+      _ -> Monitor.live_check_remote_domain_status(remote_id)
+    end
+  end
+
+  defp delete_remote_domain_with_profile(remote_id, nil), do: Monitor.delete_remote_domain(remote_id)
+
+  defp delete_remote_domain_with_profile(remote_id, profile_id) when is_integer(profile_id),
+    do: Monitor.delete_remote_domain(remote_id, profile_id)
+
+  defp delete_remote_domain_with_profile(remote_id, profile_id) when is_binary(profile_id) do
+    case Integer.parse(profile_id) do
+      {parsed, _} -> Monitor.delete_remote_domain(remote_id, parsed)
+      _ -> Monitor.delete_remote_domain(remote_id)
+    end
+  end
+
   defp blank_token?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank_token?(_), do: true
 
-  defp assign_sflink_profile(socket) do
-    case Monitor.get_remote_profile_stats() do
-      {:ok, profile} ->
-        assign(socket, :sflink_profile, profile)
+  defp mask_api_token(token) when is_binary(token) do
+    trimmed = String.trim(token)
 
-      {:error, reason} ->
-        socket
-        |> assign(:sflink_profile, nil)
-        |> put_flash(:error, "Gagal load profile SFLINK: #{format_reason(reason)}")
+    cond do
+      trimmed == "" ->
+        "-"
+
+      String.length(trimmed) <= 14 ->
+        trimmed
+
+      true ->
+        "#{String.slice(trimmed, 0, 10)}...#{String.slice(trimmed, -4, 4)}"
     end
+  end
+
+  defp mask_api_token(_), do: "-"
+
+  defp assign_sflink_profile(socket) do
+    profiles = Monitor.list_sflink_profiles()
+
+    socket
+    |> assign(:sflink_profiles, profiles)
+    |> assign(:sflink_profile, List.last(profiles))
   end
 
   defp profile_field(map, keys) when is_map(map) do
@@ -1233,4 +1448,62 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   end
 
   defp normalize_search(_), do: ""
+
+  defp assign_add_domain_profiles(socket) do
+    profiles = Monitor.list_add_domain_profiles()
+    default_profile_id = default_add_domain_profile_id(profiles)
+    current_profile_id = socket.assigns.domain_form[:profile_id].value |> to_string()
+
+    profile_id =
+      cond do
+        current_profile_id != "" and
+            Enum.any?(profiles, fn profile -> to_string(profile.id) == current_profile_id end) ->
+          current_profile_id
+
+        true ->
+          default_profile_id
+      end
+
+    socket
+    |> assign(:add_domain_profiles, profiles)
+    |> assign(
+      :domain_form,
+      to_form(%{"name" => socket.assigns.domain_form[:name].value || "", "profile_id" => profile_id}, as: :domain)
+    )
+  end
+
+  defp default_add_domain_profile_id([profile | _]), do: to_string(profile.id)
+  defp default_add_domain_profile_id(_), do: ""
+
+  defp profile_option_label(profile) when is_map(profile) do
+    name = profile[:name] || "Profile"
+    remaining = profile[:domains_remaining]
+    limit = profile[:domains_limit]
+
+    case {remaining, limit} do
+      {r, l} when is_integer(r) and is_integer(l) -> "#{name} (sisa #{r}/#{l})"
+      {r, _} when is_integer(r) -> "#{name} (sisa #{r})"
+      _ -> name
+    end
+  end
+
+  defp add_domain_quota_label(profiles, selected_profile_id) do
+    selected =
+      selected_profile_id
+      |> to_string()
+      |> String.trim()
+
+    case Enum.find(profiles, fn profile -> to_string(profile.id) == selected end) do
+      nil ->
+        nil
+
+      profile ->
+        case {profile[:domains_remaining], profile[:domains_limit]} do
+          {r, l} when is_integer(r) and is_integer(l) -> "Sisa kuota #{r} dari #{l} domain."
+          {r, _} when is_integer(r) -> "Sisa kuota #{r} domain."
+          _ -> "Kuota domain tersedia."
+        end
+    end
+  end
+
 end

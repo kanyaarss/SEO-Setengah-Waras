@@ -18,6 +18,6 @@ defmodule ElixirNawalaDK168.Monitor.SflinkProfile do
     |> validate_length(:name, min: 2, max: 80)
     |> validate_format(:api_token, ~r/^sf_[a-zA-Z0-9]+$/)
     |> unique_constraint(:name)
+    |> unique_constraint(:api_token)
   end
 end
-

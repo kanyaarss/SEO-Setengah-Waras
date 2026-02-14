@@ -37,29 +37,11 @@ services:
       - NODE_HEADLESS=true
       - GO_HOST=go-orchestrator
       - GO_PORT=8080
-      - PYTHON_HOST=python-ai
-      - PYTHON_PORT=5000
     depends_on:
       - redis
       - go-orchestrator
-      - python-ai
     deploy:
       replicas: 2
-
-  python-ai:
-    build:
-      context: ./python
-      dockerfile: Dockerfile
-    container_name: backlynx-ai
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - PYTHON_PORT=5000
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    depends_on:
-      - redis
 
 volumes:
   redis_data:

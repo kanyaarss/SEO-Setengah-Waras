@@ -1,6 +1,7 @@
 ARG ELIXIR_VERSION=1.17.3
-ARG OTP_VERSION=27.0
-ARG DEBIAN_VERSION=bookworm
+ARG OTP_VERSION=25.3.2.14
+ARG DEBIAN_VERSION=bookworm-20240904-slim
+ARG RUNNER_DEBIAN_VERSION=bookworm-20240904-slim
 
 FROM hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION} AS builder
 
@@ -13,22 +14,25 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+ENV ERL_INETRC=/etc/inetrc
+RUN echo "{inet6, false}." > /etc/inetrc
+
 RUN mix local.hex --force && mix local.rebar --force
 
 COPY mix.exs mix.lock ./
 COPY config config
+COPY deps deps
 
-RUN mix deps.get --only ${MIX_ENV}
 RUN mix deps.compile
 
 COPY lib lib
 COPY priv priv
 COPY assets assets
 
-RUN mix assets.deploy
+RUN mix phx.digest
 RUN mix release
 
-FROM debian:${DEBIAN_VERSION}-slim AS runner
+FROM debian:${RUNNER_DEBIAN_VERSION} AS runner
 
 ENV MIX_ENV=prod
 ENV LANG=C.UTF-8

@@ -6,11 +6,14 @@ const UserAgent = require('user-agents');
 class NodeJSWorker {
     constructor() {
         this.redis = null;
+        this.control = null;
         this.browser = null;
         this.isRunning = false;
         this.config = this.loadConfig();
         this.processingCount = 0;
         this.maxConcurrent = 5;
+        this.stopRequested = false;
+        this.activePages = new Set();
     }
 
     loadConfig() {
@@ -19,10 +22,9 @@ class NodeJSWorker {
             redisQueue: process.env.REDIS_QUEUE || 'url_queue',
             redisErrorQueue: process.env.REDIS_ERROR_QUEUE || 'backlynx:queue:error',
             redisResultQueue: process.env.REDIS_RESULT_QUEUE || 'result_queue',
+            controlChannel: process.env.REDIS_CONTROL_CHANNEL || 'backlynx:control',
             goHost: process.env.GO_HOST || 'go-orchestrator',
             goPort: process.env.GO_PORT || '8080',
-            pythonHost: process.env.PYTHON_HOST || 'python-ai',
-            pythonPort: process.env.PYTHON_PORT || '5000',
             headless: process.env.NODE_HEADLESS === 'true',
             maxConcurrent: parseInt(process.env.MAX_CONCURRENT_URLS) || 5
         };
@@ -34,6 +36,16 @@ class NodeJSWorker {
             this.redis = Redis.createClient({ url: this.config.redisUrl });
             await this.redis.connect();
             console.log('Connected to Redis');
+
+            // Control channel listener for start/stop actions
+            this.control = this.redis.duplicate();
+            await this.control.connect();
+            await this.control.subscribe(this.config.controlChannel, (message) => {
+                this.handleControlMessage(message).catch((err) => {
+                    console.error('Control handler failed:', err.message);
+                });
+            });
+            console.log(`Subscribed to control channel: ${this.config.controlChannel}`);
 
             // Initialize Playwright browser
             this.browser = await chromium.launch({
@@ -92,6 +104,11 @@ class NodeJSWorker {
         
         while (this.isRunning) {
             try {
+                if (this.stopRequested) {
+                    await this.sleep(300);
+                    continue;
+                }
+
                 // Check if we can process more tasks
                 if (this.processingCount >= this.maxConcurrent) {
                     await this.sleep(1000);
@@ -124,6 +141,11 @@ class NodeJSWorker {
                             console.warn('Invalid task structure, missing required fields:', task);
                             continue;
                         }
+
+                        if (this.stopRequested) {
+                            console.log(`Stop requested, skipping task: ${task.url}`);
+                            continue;
+                        }
                         
                         this.processingCount++;
                         console.log(`Processing task: ${task.url} (concurrent: ${this.processingCount})`);
@@ -154,9 +176,12 @@ class NodeJSWorker {
 
     async processTask(task) {
         const startTime = Date.now();
+        let shouldSendResult = true;
+        let page = null;
         let result = {
             url: task.url,
             anchor: task.anchor,
+            target_domain: task.targetDomain,
             targetDomain: task.targetDomain,
             status: 'failed',
             responseTime: 0,
@@ -165,9 +190,11 @@ class NodeJSWorker {
         };
 
         try {
+            this.ensureActive();
             console.log(`Starting browser automation for: ${task.url}`);
             
-            const page = await this.browser.newPage();
+            page = await this.browser.newPage();
+            this.activePages.add(page);
             
             // Set random user agent
             const userAgent = new UserAgent();
@@ -183,17 +210,20 @@ class NodeJSWorker {
             await page.setViewportSize({ width: 1366, height: 768 });
             
             // Navigate to URL
+            this.ensureActive();
             console.log(`[nav] goto ${task.url}`);
             await this.gotoWithRetry(page, task.url, 2);
             console.log(`[nav] loaded ${task.url}`);
             
             // Wait for page to load
+            this.ensureActive();
             await page.waitForTimeout(2000);
             
             // Try to find and fill forms or inject backlink
             const injectionResult = await this.injectBacklink(page, task);
             
             if (injectionResult.ok) {
+                this.ensureActive();
                 await page.waitForTimeout(10000);
                 const verify = await this.verifySubmission(page, task);
                 if (verify.ok) {
@@ -213,10 +243,12 @@ class NodeJSWorker {
                 console.warn(`Injection failed for ${task.url}: ${result.error}`);
             }
             
-            await page.close();
-            
         } catch (error) {
             const msg = error && error.message ? error.message : String(error);
+            if (msg === 'PROCESS_STOPPED') {
+                shouldSendResult = false;
+                console.log(`Task aborted by stop signal: ${task.url}`);
+            }
             if (
                 msg.includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE') ||
                 msg.includes('net::ERR_CERT_AUTHORITY_INVALID') ||
@@ -227,18 +259,33 @@ class NodeJSWorker {
                 result.error = msg;
             }
             console.error(`Failed to process ${task.url}:`, msg);
+        } finally {
+            if (page) {
+                try {
+                    if (!page.isClosed()) {
+                        await page.close();
+                    }
+                } catch (closeError) {
+                    console.warn(`Failed to close page for ${task.url}:`, closeError.message);
+                } finally {
+                    this.activePages.delete(page);
+                }
+            }
         }
         
         result.responseTime = Date.now() - startTime;
         
         // Send result back to Go orchestrator
-        await this.sendResult(result);
+        if (shouldSendResult) {
+            await this.sendResult(result);
+        }
         
         console.log(`Task completed: ${task.url} - ${result.status} (${result.responseTime}ms)`);
     }
 
     async injectBacklink(page, task) {
         try {
+            this.ensureActive();
             // Try multiple injection strategies
             const attempts = [];
             await this.scrollForLazyLoad(page, attempts);
@@ -255,6 +302,7 @@ class NodeJSWorker {
             ];
             
             for (const selector of commentSelectors) {
+                this.ensureActive();
                 try {
                     await page.waitForSelector(selector, { timeout: 5000 });
                     attempts.push(`comment:${selector}:found`);
@@ -277,6 +325,7 @@ class NodeJSWorker {
                     ];
                     
                     for (const submitSelector of submitSelectors) {
+                        this.ensureActive();
                         try {
                             await page.click(submitSelector);
                             await page.waitForTimeout(3000);
@@ -301,6 +350,7 @@ class NodeJSWorker {
             ];
             
             for (const selector of contactSelectors) {
+                this.ensureActive();
                 try {
                     await page.waitForSelector(selector, { timeout: 5000 });
                     attempts.push(`contact:${selector}:found`);
@@ -335,6 +385,7 @@ class NodeJSWorker {
     async gotoWithRetry(page, url, attempts) {
         let lastError = null;
         for (let i = 1; i <= attempts; i++) {
+            this.ensureActive();
             try {
                 await page.goto(url, {
                     waitUntil: 'domcontentloaded',
@@ -368,6 +419,7 @@ class NodeJSWorker {
 
     async verifySubmission(page, task) {
         try {
+            this.ensureActive();
             await page.waitForTimeout(3000);
 
             const moderation = await page.evaluate(() => {
@@ -539,11 +591,59 @@ class NodeJSWorker {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    ensureActive() {
+        if (this.stopRequested || !this.isRunning) {
+            throw new Error('PROCESS_STOPPED');
+        }
+    }
+
+    async handleControlMessage(message) {
+        let payload = null;
+        try {
+            payload = JSON.parse(message);
+        } catch (error) {
+            payload = { action: String(message || '').trim() };
+        }
+
+        const action = (payload.action || '').toLowerCase();
+        if (action === 'stop') {
+            this.stopRequested = true;
+            console.log('Received STOP control signal');
+            await this.abortActivePages();
+            return;
+        }
+        if (action === 'start') {
+            this.stopRequested = false;
+            console.log('Received START control signal');
+        }
+    }
+
+    async abortActivePages() {
+        const pages = Array.from(this.activePages);
+        for (const page of pages) {
+            try {
+                if (!page.isClosed()) {
+                    await page.close();
+                }
+            } catch (error) {
+                console.warn('Failed to close active page:', error.message);
+            } finally {
+                this.activePages.delete(page);
+            }
+        }
+    }
+
     async stop() {
         this.isRunning = false;
+        this.stopRequested = true;
+        await this.abortActivePages();
         
         if (this.browser) {
             await this.browser.close();
+        }
+
+        if (this.control) {
+            await this.control.disconnect();
         }
         
         if (this.redis) {

@@ -1421,6 +1421,7 @@
         border-radius: 12px;
         background: linear-gradient(170deg, rgba(20, 38, 66, 0.95), rgba(15, 29, 52, 0.95));
         padding: 0.95rem;
+        box-shadow: 0 14px 30px rgba(5, 12, 27, 0.34);
       }
 
       .add-domain-hero h2,
@@ -1470,13 +1471,64 @@
 
       .add-domain-form-card label {
         margin-top: 0.7rem;
+        color: #dbe8fb;
+        font-weight: 600;
       }
 
+      .add-domain-form-card .add-domain-profile-select,
       .add-domain-form-card input[type="text"] {
         height: 40px;
         border-radius: 10px;
         border-color: #38517b;
         background: linear-gradient(180deg, #10203a, #0d1a31);
+      }
+
+      .add-domain-form-card .add-domain-profile-select {
+        width: 100%;
+        color: #e9f2ff;
+        padding: 0 2.2rem 0 0.7rem;
+        border: 1px solid #3b5f8e;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        background-image:
+          linear-gradient(45deg, transparent 50%, #9cc7ff 50%),
+          linear-gradient(135deg, #9cc7ff 50%, transparent 50%);
+        background-position:
+          calc(100% - 16px) calc(50% - 2px),
+          calc(100% - 10px) calc(50% - 2px);
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+      }
+
+      .add-domain-form-card .add-domain-profile-select:hover {
+        border-color: #4f79ae;
+      }
+
+      .add-domain-form-card .add-domain-profile-select:focus,
+      .add-domain-form-card .add-domain-profile-select:focus-visible {
+        outline: none;
+        border-color: #67a1ea;
+        box-shadow: 0 0 0 3px rgba(73, 141, 226, 0.28), 0 8px 18px rgba(19, 44, 76, 0.38);
+        background-color: #112445;
+      }
+
+      .add-domain-form-card .add-domain-profile-select option {
+        color: #102443;
+        background: #eaf3ff;
+      }
+
+      .add-domain-profile-badge {
+        margin: 0.45rem 0 0;
+        display: inline-block;
+        padding: 0.36rem 0.62rem;
+        border-radius: 999px;
+        border: 1px solid #2f6fa4;
+        background: linear-gradient(180deg, rgba(28, 68, 101, 0.82), rgba(20, 50, 75, 0.82));
+        color: #cde9ff;
+        font-size: 0.76rem;
+        letter-spacing: 0.01em;
       }
 
       .add-domain-form-card .actions {
@@ -1487,6 +1539,13 @@
         display: inline-flex;
         align-items: center;
         gap: 0.42rem;
+        background: linear-gradient(135deg, #2a7cf7, #2fa2f5);
+        border: 1px solid #5ba4ff;
+        box-shadow: 0 8px 18px rgba(44, 116, 221, 0.32);
+      }
+
+      .add-domain-form-card .actions button:hover {
+        filter: brightness(1.07);
       }
 
       .form-hint {

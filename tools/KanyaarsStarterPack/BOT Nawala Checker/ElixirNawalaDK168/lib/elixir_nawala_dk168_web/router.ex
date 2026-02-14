@@ -35,6 +35,7 @@ defmodule ElixirNawalaDK168Web.Router do
     live "/dashboard", AdminDashboardLive, :home
     live "/home", AdminDashboardLive, :home
     live "/profile", AdminDashboardLive, :profile
+    live "/telegram", AdminDashboardLive, :telegram
     live "/domain/add", AdminDashboardLive, :add_domain
     live "/domain/list", AdminDashboardLive, :list_domain
     live "/domain/status", AdminDashboardLive, :status_domain

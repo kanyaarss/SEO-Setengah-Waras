@@ -1,18 +1,17 @@
-# BackLynx v1.0 - Web UI Version
+﻿# BackLynx v1.0 - Web UI Version
 
-## 🎯 Project Overview
+## ðŸŽ¯ Project Overview
 
 **BackLynx Web UI** adalah versi berbasis web dari sistem backlink injection yang memungkinkan pengguna untuk mengupload file URLs.txt dan mengkonfigurasi target domain serta anchor text melalui interface yang user-friendly.
 
 ### Architecture
 - **Go Layer**: Web server dan orchestrator untuk URL processing
 - **Node.js Layer**: Browser automation dengan Puppeteer/Playwright
-- **Python Layer**: AI-powered content generation dan intelligence
 - **Web UI**: Modern HTML5 interface dengan TailwindCSS
 
 ---
 
-## 🚀 Quick Start
+## ðŸš€ Quick Start
 
 ### Prerequisites
 - Docker Desktop 4.0+
@@ -26,7 +25,7 @@ cd "BackLynx (v1)"
 
 # 2. Setup environment
 cp .env.example .env
-# Edit .env dengan konfigurasi Anda (OPENAI_API_KEY, dll)
+# Edit .env jika perlu (worker count, timeout, dll)
 
 # 3. Deploy
 docker-compose up -d
@@ -37,25 +36,24 @@ Buka browser anda dan akses: **http://localhost:8080**
 
 ---
 
-## 📁 Project Structure
+## ðŸ“ Project Structure
 
 ```
 BackLynx (v1)/
-├── web/                   # Web UI files
-│   └── index.html        # Main web interface
-├── go/                    # Go Web Server & Orchestrator
-│   ├── main.go           # Main application with web API
-│   ├── Dockerfile
-│   └── go.mod
-├── nodejs/                # Node.js Browser Engine
-├── python/                # Python Intelligence Engine
-├── docker-compose.yml      # Docker orchestration
-└── .env.example          # Environment template
+â”œâ”€â”€ web/                   # Web UI files
+â”‚   â””â”€â”€ index.html        # Main web interface
+â”œâ”€â”€ go/                    # Go Web Server & Orchestrator
+â”‚   â”œâ”€â”€ main.go           # Main application with web API
+â”‚   â”œâ”€â”€ Dockerfile
+â”‚   â””â”€â”€ go.mod
+â”œâ”€â”€ nodejs/                # Node.js Browser Engine
+â”œâ”€â”€ docker-compose.yml      # Docker orchestration
+â””â”€â”€ .env.example          # Environment template
 ```
 
 ---
 
-## 🔧 Web UI Usage
+## ðŸ”§ Web UI Usage
 
 ### 1. Upload URLs
 - Click "Choose File" atau drag & drop file URLs.txt
@@ -78,7 +76,7 @@ BackLynx (v1)/
 
 ---
 
-## 📊 API Endpoints
+## ðŸ“Š API Endpoints
 
 - **Web UI**: `http://localhost:8080`
 - **API Status**: `GET /api/v1/status`
@@ -101,32 +99,32 @@ POST /api/v1/process
 
 ---
 
-## �️ Features
+## ï¿½ï¸ Features
 
 ### Web Interface
-- ✅ Drag & drop file upload
-- ✅ Real-time progress monitoring
-- ✅ Responsive design
-- ✅ Modern UI dengan TailwindCSS
-- ✅ CSV export functionality
+- âœ… Drag & drop file upload
+- âœ… Real-time progress monitoring
+- âœ… Responsive design
+- âœ… Modern UI dengan TailwindCSS
+- âœ… CSV export functionality
 
 ### Core Functionality
-- ✅ Smart Backlink Injection
-- ✅ Anti-Detection Systems
-- ✅ Concurrent Processing (1000+ URLs)
-- ✅ AI Comment Generation
-- ✅ Proxy Rotation Support
-- ✅ In-memory processing (no database)
+- âœ… Smart Backlink Injection
+- âœ… Anti-Detection Systems
+- âœ… Concurrent Processing (1000+ URLs)
+- âœ… Rule-based Comment Generation (non-AI)
+- âœ… Proxy Rotation Support
+- âœ… In-memory processing (no database)
 
 ### Privacy & Security
-- ✅ No data persistence
-- ✅ In-memory processing only
-- ✅ Results cleared after each session
-- ✅ No user data storage
+- âœ… No data persistence
+- âœ… In-memory processing only
+- âœ… Results cleared after each session
+- âœ… No user data storage
 
 ---
 
-## 📈 Performance Targets
+## ðŸ“ˆ Performance Targets
 
 - **Success Rate**: 30-50% dari 1000 URLs
 - **Processing Time**: 1-4 hours total
@@ -135,7 +133,7 @@ POST /api/v1/process
 
 ---
 
-## 🔍 Monitoring & Debugging
+## ðŸ” Monitoring & Debugging
 
 ### Web Interface Monitoring
 - Real-time progress bar
@@ -150,16 +148,15 @@ docker-compose logs -f
 # Specific service
 docker-compose logs -f go-orchestrator
 docker-compose logs -f nodejs-workers
-docker-compose logs -f python-ai
 ```
 
 ---
 
-## 🚨 Troubleshooting
+## ðŸš¨ Troubleshooting
 
 ### Common Issues
 1. **Docker not running**: Start Docker Desktop
-2. **Port conflicts**: Check ports 8080, 5000, 6379
+2. **Port conflicts**: Check ports 8080 and 6379
 3. **File upload fails**: Ensure file is .txt format
 4. **Processing stuck**: Check logs for errors
 
@@ -171,7 +168,7 @@ LOG_LEVEL=debug docker-compose up
 
 ---
 
-## � Support
+## ï¿½ Support
 
 ### Web UI Issues
 - Check browser console for JavaScript errors
@@ -186,3 +183,5 @@ LOG_LEVEL=debug docker-compose up
 ---
 
 **BackLynx v1.0 Web UI** - Professional backlink injection system with modern web interface.
+
+

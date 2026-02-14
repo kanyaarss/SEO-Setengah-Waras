@@ -5,7 +5,9 @@ defmodule ElixirNawalaDK168.Workers.CheckDomainWorker do
   alias ElixirNawalaDK168.Sflink.Client
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"domain_id" => domain_id}}) do
+  def perform(%Oban.Job{args: %{"domain_id" => domain_id} = args}) do
+    token = Map.get(args, "api_token")
+
     case Monitor.get_domain(domain_id) do
       nil ->
         :discard
@@ -13,7 +15,7 @@ defmodule ElixirNawalaDK168.Workers.CheckDomainWorker do
       domain ->
         previous_status = domain.last_status
 
-        with {:ok, result} <- Client.fetch_domain_status(domain.name),
+        with {:ok, result} <- Client.fetch_domain_status(domain.name, token),
              {:ok, %{domain: updated_domain, changed?: changed?}} <-
                Monitor.record_domain_check(
                  domain,
@@ -39,8 +41,11 @@ defmodule ElixirNawalaDK168.Workers.CheckDomainWorker do
     end
   end
 
-  def new_job(domain_id) when is_integer(domain_id) do
-    %{"domain_id" => domain_id}
+  def new_job(domain_id, token \\ nil) when is_integer(domain_id) do
+    args =
+      %{"domain_id" => domain_id}
+      |> maybe_put_token(token)
+
     |> Oban.Job.new(
       worker: __MODULE__,
       queue: :checker,
@@ -52,4 +57,10 @@ defmodule ElixirNawalaDK168.Workers.CheckDomainWorker do
       ]
     )
   end
+
+  defp maybe_put_token(args, token) when is_binary(token) and token != "" do
+    Map.put(args, "api_token", token)
+  end
+
+  defp maybe_put_token(args, _token), do: args
 end

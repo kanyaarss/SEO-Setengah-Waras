@@ -16,6 +16,31 @@ defmodule ElixirNawalaDK168.Release do
     {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
   end
 
+  def seed_default_admin do
+    load_app()
+
+    email = System.get_env("DEFAULT_ADMIN_EMAIL") || "admin@dk168.local"
+    password = System.get_env("DEFAULT_ADMIN_PASSWORD") || "ChangeMe123!"
+
+    for repo <- repos() do
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(repo, fn repo_conn ->
+          case repo_conn.get_by(ElixirNawalaDK168.Accounts.Admin, email: email) do
+            nil ->
+              %ElixirNawalaDK168.Accounts.Admin{}
+              |> ElixirNawalaDK168.Accounts.Admin.registration_changeset(%{
+                email: email,
+                password: password
+              })
+              |> repo_conn.insert!()
+
+            _ ->
+              :ok
+          end
+        end)
+    end
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

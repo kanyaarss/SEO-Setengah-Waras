@@ -411,12 +411,12 @@
         }
 
         function updateProgress(data) {
-            const total = uploadedURLs.length;
+            const total = data.total || uploadedURLs.length;
             const processed = data.processed || 0;
             const success = data.success || 0;
             const failed = data.failed || 0;
             
-            const percent = Math.round((processed / total) * 100);
+            const percent = total > 0 ? Math.round((processed / total) * 100) : 100;
             
             document.getElementById('progressPercent').textContent = percent + '%';
             document.getElementById('progressBar').style.width = percent + '%';

@@ -8,5 +8,8 @@ if [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
   "$APP_BIN" eval "ElixirNawalaDK168.Release.migrate()"
 fi
 
+echo "Ensuring default admin..."
+"$APP_BIN" eval "ElixirNawalaDK168.Release.seed_default_admin()"
+
 echo "Starting application..."
 exec "$APP_BIN" "${1:-start}"

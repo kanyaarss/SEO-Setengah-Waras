@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,25 +22,25 @@ import (
 )
 
 type Config struct {
-	RedisURL         string `json:"redis_url"`
-	GoPort           string `json:"go_port"`
-	GoWorkerCount    int    `json:"go_worker_count"`
-	MaxConcurrentURLs int   `json:"max_concurrent_urls"`
-	BatchSize        int    `json:"batch_size"`
-	RetryAttempts    int    `json:"retry_attempts"`
-	TimeoutSeconds   int    `json:"timeout_seconds"`
+	RedisURL          string `json:"redis_url"`
+	GoPort            string `json:"go_port"`
+	GoWorkerCount     int    `json:"go_worker_count"`
+	MaxConcurrentURLs int    `json:"max_concurrent_urls"`
+	BatchSize         int    `json:"batch_size"`
+	RetryAttempts     int    `json:"retry_attempts"`
+	TimeoutSeconds    int    `json:"timeout_seconds"`
 }
 
 type URLTask struct {
-	ID          string    `json:"id"`
-	URL         string    `json:"url"`
-	Anchor      string    `json:"anchor"`
-	TargetDomain string   `json:"target_domain"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	ResponseTime float64  `json:"response_time"`
-	Error       string    `json:"error,omitempty"`
+	ID           string    `json:"id"`
+	URL          string    `json:"url"`
+	Anchor       string    `json:"anchor"`
+	TargetDomain string    `json:"target_domain"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ResponseTime float64   `json:"response_time"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type ProcessRequest struct {
@@ -54,32 +58,34 @@ type ProcessStatus struct {
 }
 
 type Result struct {
-	Timestamp   time.Time `json:"timestamp"`
-	URL         string    `json:"url"`
-	Anchor      string    `json:"anchor"`
-	TargetDomain string   `json:"target_domain"`
-	Status      string    `json:"status"`
-	ResponseTime float64  `json:"response_time"`
-	Error       string    `json:"error,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	URL          string    `json:"url"`
+	Anchor       string    `json:"anchor"`
+	TargetDomain string    `json:"target_domain"`
+	Status       string    `json:"status"`
+	ResponseTime float64   `json:"response_time"`
+	Error        string    `json:"error,omitempty"`
 }
 
 var (
-	config       Config
-	logger       *logrus.Logger
-	redisClient  *redis.Client
-	results      []Result
-	resultsMutex sync.RWMutex
+	config        Config
+	logger        *logrus.Logger
+	redisClient   *redis.Client
+	results       []Result
+	resultsMutex  sync.RWMutex
 	processStatus ProcessStatus
-	statusMutex  sync.RWMutex
-	logMessages  []string
-	logMutex     sync.RWMutex
+	statusMutex   sync.RWMutex
+	logMessages   []string
+	logMutex      sync.RWMutex
 )
+
+const controlChannel = "backlynx:control"
 
 func init() {
 	logger = logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logger.SetLevel(logrus.InfoLevel)
-	
+
 	// Add custom hook for storing logs
 	logger.AddHook(&CustomLogHook{})
 }
@@ -90,25 +96,25 @@ type CustomLogHook struct{}
 func (hook *CustomLogHook) Fire(entry *logrus.Entry) error {
 	logMutex.Lock()
 	defer logMutex.Unlock()
-	
+
 	timestamp := entry.Time.Format("2006-01-02 15:04:05")
 	level := strings.ToUpper(entry.Level.String())
 	message := fmt.Sprintf("[%s] %s: %s", timestamp, level, entry.Message)
-	
+
 	// Add fields if present
 	if len(entry.Data) > 0 {
 		for k, v := range entry.Data {
 			message += fmt.Sprintf(" %s=%v", k, v)
 		}
 	}
-	
+
 	logMessages = append(logMessages, message)
-	
+
 	// Keep only last 1000 log messages
 	if len(logMessages) > 1000 {
 		logMessages = logMessages[len(logMessages)-1000:]
 	}
-	
+
 	return nil
 }
 
@@ -119,7 +125,7 @@ func (hook *CustomLogHook) Levels() []logrus.Level {
 func getRecentLogs() []string {
 	logMutex.RLock()
 	defer logMutex.RUnlock()
-	
+
 	// Return last 50 log messages
 	if len(logMessages) <= 50 {
 		return logMessages
@@ -225,7 +231,30 @@ func enqueueURLs(ctx context.Context, tasks []URLTask) error {
 	return nil
 }
 
+func publishControl(action string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	payload := fmt.Sprintf(`{"action":"%s","ts":"%s"}`, action, time.Now().Format(time.RFC3339))
+	if err := redisClient.Publish(ctx, controlChannel, payload).Err(); err != nil {
+		logger.Errorf("Failed to publish control action %s: %v", action, err)
+		return
+	}
+	logger.Infof("Published control action: %s", action)
+}
+
 func processResults(ctx context.Context) error {
+	type resultPayload struct {
+		Timestamp       time.Time `json:"timestamp"`
+		URL             string    `json:"url"`
+		Anchor          string    `json:"anchor"`
+		TargetDomain    string    `json:"target_domain"`
+		TargetDomainAlt string    `json:"targetDomain"`
+		Status          string    `json:"status"`
+		ResponseTime    float64   `json:"response_time"`
+		Error           string    `json:"error,omitempty"`
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -244,9 +273,32 @@ func processResults(ctx context.Context) error {
 				continue
 			}
 
-			var result Result
-			if err := json.Unmarshal([]byte(resultJSON[1]), &result); err != nil {
+			var payload resultPayload
+			if err := json.Unmarshal([]byte(resultJSON[1]), &payload); err != nil {
 				logger.Errorf("Failed to unmarshal result: %v", err)
+				continue
+			}
+
+			targetDomain := payload.TargetDomain
+			if targetDomain == "" {
+				targetDomain = payload.TargetDomainAlt
+			}
+
+			result := Result{
+				Timestamp:    payload.Timestamp,
+				URL:          payload.URL,
+				Anchor:       payload.Anchor,
+				TargetDomain: targetDomain,
+				Status:       payload.Status,
+				ResponseTime: payload.ResponseTime,
+				Error:        payload.Error,
+			}
+
+			statusMutex.RLock()
+			shouldProcess := processStatus.Status == "processing"
+			statusMutex.RUnlock()
+			if !shouldProcess {
+				logger.Infof("Dropped late result for %s because process is not active", result.URL)
 				continue
 			}
 
@@ -277,7 +329,7 @@ func updateProcessStatus(result Result) {
 	} else {
 		processStatus.Failed++
 	}
-	
+
 	if processStatus.Processed >= processStatus.Total {
 		processStatus.Status = "completed"
 	}
@@ -293,15 +345,15 @@ func startAPI() {
 	r.GET("/api/v1/status", func(c *gin.Context) {
 		statusMutex.RLock()
 		defer statusMutex.RUnlock()
-		
+
 		c.JSON(http.StatusOK, gin.H{
-			"status":      processStatus.Status,
-			"timestamp":   time.Now(),
-			"queue_size":  getQueueSize(),
-			"processed":   processStatus.Processed,
-			"success":     processStatus.Success,
-			"failed":      processStatus.Failed,
-			"total":       processStatus.Total,
+			"status":     processStatus.Status,
+			"timestamp":  time.Now(),
+			"queue_size": getQueueSize(),
+			"processed":  processStatus.Processed,
+			"success":    processStatus.Success,
+			"failed":     processStatus.Failed,
+			"total":      processStatus.Total,
 		})
 	})
 
@@ -318,17 +370,10 @@ func startAPI() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
-		// Initialize process status
-		statusMutex.Lock()
-		processStatus = ProcessStatus{
-			Status:    "processing",
-			Processed: 0,
-			Success:   0,
-			Failed:    0,
-			Total:     len(req.URLs),
+		if strings.TrimSpace(req.TargetDomain) == "" || strings.TrimSpace(req.AnchorText) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "targetDomain and anchorText are required"})
+			return
 		}
-		statusMutex.Unlock()
 
 		// Clear previous results
 		resultsMutex.Lock()
@@ -342,6 +387,23 @@ func startAPI() {
 			return
 		}
 
+		// Initialize process status based on valid tasks.
+		statusMutex.Lock()
+		processStatus = ProcessStatus{
+			Status:    "processing",
+			Processed: 0,
+			Success:   0,
+			Failed:    0,
+			Total:     len(tasks),
+		}
+		if len(tasks) == 0 {
+			processStatus.Status = "completed"
+		}
+		statusMutex.Unlock()
+
+		// Ensure workers are in active mode before enqueueing new tasks.
+		publishControl("start")
+
 		// Enqueue URLs to Redis
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -351,6 +413,19 @@ func startAPI() {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Processing started", "total_urls": len(tasks)})
+	})
+
+	// Stop processing, export current results, and clear queue/cache.
+	r.POST("/api/v1/stop", func(c *gin.Context) {
+		// Tell workers to abort active processing first.
+		publishControl("stop")
+
+		csvData := getCSVSnapshot()
+		clearRuntimeState()
+
+		c.Header("Content-Type", "text/csv")
+		c.Header("Content-Disposition", "attachment; filename=backlynx_results.csv")
+		c.String(http.StatusOK, csvData)
 	})
 
 	// Get results endpoint
@@ -364,34 +439,28 @@ func startAPI() {
 	r.GET("/api/v1/export", func(c *gin.Context) {
 		resultsMutex.RLock()
 		defer resultsMutex.RUnlock()
-		
+
 		if len(results) == 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "No results to export"})
 			return
 		}
 
-		// Generate CSV in memory
-		var csvData strings.Builder
-		csvData.WriteString("timestamp,url,anchor,target_domain,status,response_time\n")
-		
-		for _, result := range results {
-			line := fmt.Sprintf("%s,%s,%s,%s,%s,%.2f\n",
-				result.Timestamp.Format(time.RFC3339),
-				result.URL, result.Anchor, result.TargetDomain,
-				result.Status, result.ResponseTime)
-			csvData.WriteString(line)
+		csvData, err := buildCSVData(results)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to build CSV: %v", err)})
+			return
 		}
 
 		c.Header("Content-Type", "text/csv")
 		c.Header("Content-Disposition", "attachment; filename=backlynx_results.csv")
-		c.String(http.StatusOK, csvData.String())
+		c.String(http.StatusOK, csvData)
 	})
 
 	// Simple logs endpoint
 	r.GET("/api/v1/logs", func(c *gin.Context) {
 		logMutex.RLock()
 		defer logMutex.RUnlock()
-		
+
 		// Return last 20 log messages as JSON
 		var recentLogs []string
 		if len(logMessages) <= 20 {
@@ -401,9 +470,9 @@ func startAPI() {
 			recentLogs = make([]string, 20)
 			copy(recentLogs, logMessages[len(logMessages)-20:])
 		}
-		
+
 		c.JSON(http.StatusOK, gin.H{
-			"logs": recentLogs,
+			"logs":  recentLogs,
 			"total": len(logMessages),
 		})
 	})
@@ -417,7 +486,7 @@ func startAPI() {
 func getQueueSize() int64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	size, err := redisClient.LLen(ctx, "url_queue").Result()
 	if err != nil {
 		logger.Errorf("Failed to get queue size: %v", err)
@@ -426,27 +495,87 @@ func getQueueSize() int64 {
 	return size
 }
 
+func getCSVSnapshot() string {
+	resultsMutex.RLock()
+	defer resultsMutex.RUnlock()
+
+	csvData, err := buildCSVData(results)
+	if err != nil {
+		logger.Errorf("Failed to build CSV snapshot: %v", err)
+		return "timestamp,url,anchor,target_domain,status,response_time,error\n"
+	}
+	return csvData
+}
+
+func clearRuntimeState() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := redisClient.Del(ctx, "url_queue", "result_queue", "backlynx:queue:error").Err(); err != nil {
+		logger.Errorf("Failed to clear Redis queues: %v", err)
+	}
+
+	resultsMutex.Lock()
+	results = []Result{}
+	resultsMutex.Unlock()
+
+	statusMutex.Lock()
+	processStatus = ProcessStatus{
+		Status:    "idle",
+		Processed: 0,
+		Success:   0,
+		Failed:    0,
+		Total:     0,
+	}
+	statusMutex.Unlock()
+}
+
 func exportToCSV() error {
 	resultsMutex.RLock()
 	defer resultsMutex.RUnlock()
-	
+
 	if len(results) == 0 {
 		return fmt.Errorf("no results to export")
 	}
 
-	var csvData strings.Builder
-	csvData.WriteString("timestamp,url,anchor,target_domain,status,response_time\n")
-	
-	for _, result := range results {
-		line := fmt.Sprintf("%s,%s,%s,%s,%s,%.2f\n",
-			result.Timestamp.Format(time.RFC3339),
-			result.URL, result.Anchor, result.TargetDomain,
-			result.Status, result.ResponseTime)
-		csvData.WriteString(line)
+	if _, err := buildCSVData(results); err != nil {
+		return fmt.Errorf("failed to build CSV data: %v", err)
 	}
 
 	logger.Infof("Generated CSV with %d results", len(results))
 	return nil
+}
+
+func buildCSVData(input []Result) (string, error) {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	header := []string{"timestamp", "url", "anchor", "target_domain", "status", "response_time", "error"}
+	if err := writer.Write(header); err != nil {
+		return "", err
+	}
+
+	for _, result := range input {
+		row := []string{
+			result.Timestamp.Format(time.RFC3339),
+			result.URL,
+			result.Anchor,
+			result.TargetDomain,
+			result.Status,
+			fmt.Sprintf("%.2f", result.ResponseTime),
+			result.Error,
+		}
+		if err := writer.Write(row); err != nil {
+			return "", err
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
 }
 
 func main() {
@@ -512,6 +641,7 @@ func main() {
 
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
 	logger.Info("Shutting down gracefully...")

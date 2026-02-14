@@ -5,11 +5,11 @@ defmodule ElixirNawalaDK168.Sflink.Client do
   @timeout 10_000
   @request_opts [receive_timeout: @timeout]
 
-  def fetch_domain_status(domain_name) when is_binary(domain_name) do
+  def fetch_domain_status(domain_name, token \\ nil) when is_binary(domain_name) do
     request_id = Ecto.UUID.generate()
     started_at = System.monotonic_time(:millisecond)
 
-    with {:ok, response} <- request_status(domain_name),
+    with {:ok, response} <- request_status(domain_name, token),
          {:ok, status} <- normalize_status(response) do
       {:ok,
        %{
@@ -30,11 +30,11 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  def create_domain(domain_name) when is_binary(domain_name) do
-    url = with_api_key("#{api_base_url()}/domains")
+  def create_domain(domain_name, token \\ nil) when is_binary(domain_name) do
+    url = with_api_key("#{api_base_url()}/domains", token)
     payload = %{"domain" => domain_name}
 
-    case request(:post, url, [json: payload]) do
+    case request(:post, url, [json: payload, token: token]) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         normalize_create_domain_response(body)
 
@@ -46,10 +46,10 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  def list_domains do
-    url = with_api_key("#{api_base_url()}/domains")
+  def list_domains(token \\ nil) do
+    url = with_api_key("#{api_base_url()}/domains", token)
 
-    case request(:get, url) do
+    case request(:get, url, [token: token]) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         normalize_list_domains_response(body)
 
@@ -61,10 +61,10 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  def get_me do
-    url = with_api_key("#{api_base_url()}/me")
+  def get_me(token \\ nil) do
+    url = with_api_key("#{api_base_url()}/me", token)
 
-    case request(:get, url) do
+    case request(:get, url, [token: token]) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         normalize_me_response(body)
 
@@ -93,10 +93,10 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  def live_check_status(remote_domain_id) when is_integer(remote_domain_id) do
-    url = with_api_key("#{api_base_url()}/domains/#{remote_domain_id}/status")
+  def live_check_status(remote_domain_id, token \\ nil) when is_integer(remote_domain_id) do
+    url = with_api_key("#{api_base_url()}/domains/#{remote_domain_id}/status", token)
 
-    case request(:get, url) do
+    case request(:get, url, [token: token]) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         normalize_live_status_response(body)
 
@@ -108,10 +108,10 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  def delete_domain(remote_domain_id) when is_integer(remote_domain_id) do
-    url = with_api_key("#{api_base_url()}/domains/#{remote_domain_id}")
+  def delete_domain(remote_domain_id, token \\ nil) when is_integer(remote_domain_id) do
+    url = with_api_key("#{api_base_url()}/domains/#{remote_domain_id}", token)
 
-    case request(:delete, url) do
+    case request(:delete, url, [token: token]) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         {:ok, %{id: remote_domain_id, message: body["message"] || "Domain deleted.", raw: body}}
 
@@ -123,18 +123,18 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     end
   end
 
-  defp request_status(domain_name) do
+  defp request_status(domain_name, token) do
     base_url = api_base_url()
     encoded_name = URI.encode(domain_name)
 
-    path_url = with_api_key("#{base_url}/domains/#{encoded_name}/status")
+    path_url = with_api_key("#{base_url}/domains/#{encoded_name}/status", token)
 
-    case req_get(path_url) do
+    case req_get(path_url, token) do
       {:ok, %{status: code, body: body}} when code in 200..299 ->
         {:ok, body}
 
       {:ok, %{status: 404}} ->
-        req_get(with_api_key("#{base_url}/domains/status?domain=#{encoded_name}"))
+        req_get(with_api_key("#{base_url}/domains/status?domain=#{encoded_name}", token), token)
         |> parse_http_response()
 
       other ->
@@ -146,12 +146,12 @@ defmodule ElixirNawalaDK168.Sflink.Client do
   defp parse_http_response({:ok, %{status: code, body: body}}), do: {:error, {:http_error, code, body}}
   defp parse_http_response({:error, reason}), do: {:error, reason}
 
-  defp req_get(url) do
-    request(:get, url)
+  defp req_get(url, token) do
+    request(:get, url, [token: token])
   end
 
-  defp request_headers do
-    case api_token() do
+  defp request_headers(token) do
+    case token || api_token() do
       nil -> []
       "" -> []
       token -> [{"authorization", "Bearer #{token}"}, {"x-api-key", token}]
@@ -179,8 +179,8 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     if String.ends_with?(normalized, "/api/v1"), do: normalized, else: "#{normalized}/api/v1"
   end
 
-  defp with_api_key(url) do
-    case api_token() do
+  defp with_api_key(url, token) do
+    case token || api_token() do
       nil -> url
       "" -> url
       token -> append_query(url, "api_key", token)
@@ -342,13 +342,17 @@ defmodule ElixirNawalaDK168.Sflink.Client do
   end
 
   defp request(method, url, extra_opts \\ []) do
+    token = Keyword.get(extra_opts, :token)
     custom_headers = Keyword.get(extra_opts, :headers)
-    opts_without_headers = Keyword.delete(extra_opts, :headers)
+    opts_without_headers =
+      extra_opts
+      |> Keyword.delete(:headers)
+      |> Keyword.delete(:token)
 
     opts =
       @request_opts
       |> Keyword.merge(opts_without_headers)
-      |> Keyword.put(:headers, custom_headers || request_headers())
+      |> Keyword.put(:headers, custom_headers || request_headers(token))
 
     case Req.request(Keyword.merge(opts, method: method, url: url)) do
       {:ok, _} = ok ->
