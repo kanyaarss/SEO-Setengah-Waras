@@ -191,7 +191,7 @@ defmodule ElixirNawalaDK168.Sflink.Client do
     env_token = Application.get_env(:elixir_nawala_dk168, __MODULE__)[:api_token]
     settings_token = ElixirNawalaDK168.Monitor.list_settings()["sflink_api_token"]
 
-    [env_token, settings_token]
+    [settings_token, env_token]
     |> Enum.find_value(fn token ->
       case token do
         value when is_binary(value) ->

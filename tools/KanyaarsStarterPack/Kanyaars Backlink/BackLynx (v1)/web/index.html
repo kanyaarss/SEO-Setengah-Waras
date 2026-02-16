@@ -307,7 +307,7 @@
             // Simple polling approach for logs
             addLogEntry('Starting log monitoring...', 'info');
             
-            let lastLogCount = 0;
+            let logOffset = 0;
             
             // Poll for logs every 2 seconds
             const logInterval = setInterval(() => {
@@ -316,15 +316,14 @@
                     return;
                 }
                 
-                fetch('/api/v1/logs')
+                fetch(`/api/v1/logs?offset=${logOffset}`)
                     .then(response => response.json())
                     .then(data => {
-                        // Display new logs only
-                        if (data.logs && data.logs.length > lastLogCount) {
-                            for (let i = lastLogCount; i < data.logs.length; i++) {
-                                addLogEntry(data.logs[i], 'info');
-                            }
-                            lastLogCount = data.logs.length;
+                        if (Array.isArray(data.logs) && data.logs.length > 0) {
+                            data.logs.forEach((line) => addLogEntry(line, 'info'));
+                        }
+                        if (typeof data.total === 'number') {
+                            logOffset = data.total;
                         }
                     })
                     .catch(error => {

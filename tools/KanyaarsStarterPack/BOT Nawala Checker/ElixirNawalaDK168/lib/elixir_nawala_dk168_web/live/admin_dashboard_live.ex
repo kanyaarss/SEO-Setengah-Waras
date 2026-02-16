@@ -2,6 +2,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   use ElixirNawalaDK168Web, :live_view
 
   alias ElixirNawalaDK168.Monitor
+  alias ElixirNawalaDK168.Shortlink
   alias ElixirNawalaDK168.Telegram.Notifier
   @api_time_offset_seconds 25_200
 
@@ -16,6 +17,8 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
 
     domains = Monitor.list_domains()
     settings = Monitor.list_settings()
+
+    shortlink_defaults = Shortlink.new_short_link_form_defaults(shortlink_available_domain_names(domains, []))
 
     {:ok,
      socket
@@ -40,7 +43,20 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
      |> assign(:sidebar_collapsed, false)
      |> assign(:sidebar_open, false)
      |> assign(:domain_menu_open, false)
+     |> assign(:shortlink_menu_open, false)
      |> assign(:admin_menu_open, false)
+     |> assign(:shortlink_form, to_form(shortlink_defaults, as: :shortlink))
+     |> assign(:shortlink_list, [])
+     |> assign(:shortlink_query, "")
+     |> assign(:shortlink_stats, %{})
+     |> assign(:shortlink_recent_clicks, [])
+     |> assign(:shortlink_rotator_query, "")
+     |> assign(:shortlink_rotator_list, [])
+     |> assign(:shortlink_rotator_links, [])
+     |> assign(:rotator_fallback_domains, [])
+     |> assign(:rotator_form, to_form(Shortlink.new_rotator_form_defaults(), as: :rotator))
+     |> assign(:rotator_modal_open, false)
+     |> assign(:rotator_modal_link, nil)
      |> assign_remote_domains()}
   end
 
@@ -53,6 +69,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
       |> assign(:current_page, page)
       |> assign(:page_title, page_title(page))
       |> assign(:domain_menu_open, page in [:add_domain, :list_domain, :status_domain])
+      |> assign(:shortlink_menu_open, page in [:shortlink_create, :shortlink_list, :shortlink_stats, :shortlink_rotator])
       |> assign(:admin_menu_open, page in [:profile])
 
     socket =
@@ -86,6 +103,36 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
           |> assign(:settings, settings)
           |> assign(:settings_form, to_form(settings, as: :settings))
 
+        :shortlink_create ->
+          socket
+          |> assign_remote_domains(false)
+          |> assign(
+            :shortlink_form,
+            to_form(
+              Shortlink.new_short_link_form_defaults(
+                shortlink_available_domain_names(socket.assigns.domains, socket.assigns.remote_domains)
+              ),
+              as: :shortlink
+            )
+          )
+
+        :shortlink_list ->
+          socket
+          |> assign_shortlink_list()
+
+        :shortlink_stats ->
+          socket
+          |> assign_shortlink_stats()
+
+        :shortlink_rotator ->
+          socket
+          |> sync_remote_domains()
+          |> assign_domains(Monitor.list_domains())
+          |> assign_remote_domains(false)
+          |> live_check_all_remote_domains()
+          |> assign_shortlink_rotator_data()
+          |> assign(:rotator_form, to_form(Shortlink.new_rotator_form_defaults(), as: :rotator))
+
         _ ->
           socket
       end
@@ -110,51 +157,51 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+         |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
          |> assign(:domain_form, to_form(changeset, as: :domain))}
 
       {:error, :missing_profile_selection} ->
-        {:noreply, put_flash(socket, :error, "Pilih User Profile terlebih dahulu.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       {:error, :invalid_profile_selection} ->
-        {:noreply, put_flash(socket, :error, "User Profile tidak valid.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       {:error, :inactive_profile} ->
-        {:noreply, put_flash(socket, :error, "User Profile tidak aktif.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       {:error, :profile_not_found} ->
-        {:noreply, put_flash(socket, :error, "User Profile tidak ditemukan.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       {:error, reason} ->
         _ = format_reason(reason)
-        {:noreply, socket |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")}
+        {:noreply, socket |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
   def handle_event("toggle_domain", %{"id" => id}, socket) do
-    case Monitor.toggle_domain(String.to_integer(id)) do
-      {:ok, _domain} ->
-        domains = Monitor.list_domains()
-        {:noreply, socket |> put_flash(:info, "Status domain diperbarui.") |> assign_domains(domains)}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal mengubah status domain.")}
+    with {:ok, domain_id} <- parse_id_param(id),
+         {:ok, _domain} <- Monitor.toggle_domain(domain_id) do
+      domains = Monitor.list_domains()
+      {:noreply, socket |> put_flash(:info, "Status domain diperbarui.") |> assign_domains(domains)}
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
   def handle_event("delete_domain", %{"id" => id}, socket) do
-    case Monitor.delete_domain_from_sflink(String.to_integer(id)) do
-      {:ok, %{local_name: name, remote_id: remote_id}} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Domain #{name} deleted (SFLINK id: #{remote_id}).")
-         |> assign_domains(Monitor.list_domains())}
-
+    with {:ok, domain_id} <- parse_id_param(id),
+         {:ok, %{local_name: name, remote_id: remote_id}} <- Monitor.delete_domain_from_sflink(domain_id) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Domain #{name} deleted (SFLINK id: #{remote_id}).")
+       |> assign_domains(Monitor.list_domains())}
+    else
       {:error, :remote_domain_not_found} ->
-        {:noreply, put_flash(socket, :error, "Domain tidak ditemukan di SFLINK.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal hapus domain: #{inspect(reason)}")}
+      _ ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -176,13 +223,87 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
          |> assign_domains(Monitor.list_domains())
          |> assign_remote_domains()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Sync domain gagal: #{format_reason(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
   def handle_event("search_domain_list", %{"domain_search" => %{"q" => q}}, socket) do
     {:noreply, assign(socket, :list_domain_query, String.trim(q || ""))}
+  end
+
+  def handle_event("create_shortlink", %{"shortlink" => params}, socket) do
+    allowed_domains = shortlink_available_domain_names(socket.assigns.domains, socket.assigns.remote_domains)
+
+    case Shortlink.create_short_link(params, socket.assigns.current_admin.id, allowed_domains) do
+      {:ok, _short_link} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Shortlink berhasil dibuat.")
+         |> assign_shortlink_list()
+         |> assign_shortlink_stats()
+         |> assign(:shortlink_form, to_form(Shortlink.new_short_link_form_defaults(allowed_domains), as: :shortlink))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
+    end
+  end
+
+  def handle_event("search_shortlink_list", %{"shortlink_search" => %{"q" => q}}, socket) do
+    query = String.trim(q || "")
+    {:noreply, socket |> assign(:shortlink_query, query) |> assign_shortlink_list()}
+  end
+
+  def handle_event("set_shortlink_redirect_type", %{"id" => id, "type" => type}, socket) do
+    with {shortlink_id, _} <- Integer.parse(to_string(id)),
+         {redirect_type, _} <- Integer.parse(to_string(type)),
+         {:ok, _shortlink} <- Shortlink.update_redirect_type(shortlink_id, redirect_type) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Redirect type diperbarui.")
+       |> assign_shortlink_list()
+       |> assign_shortlink_stats()}
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
+    end
+  end
+
+  def handle_event("search_shortlink_rotator", %{"shortlink_rotator_search" => %{"q" => q}}, socket) do
+    query = String.trim(q || "")
+    {:noreply, socket |> assign(:shortlink_rotator_query, query) |> assign_shortlink_rotator_data()}
+  end
+
+  def handle_event("edit_shortlink_rotator", %{"id" => id}, socket) do
+    with {short_link_id, _} <- Integer.parse(to_string(id)),
+         link when is_map(link) <- Enum.find(socket.assigns.shortlink_rotator_links, &(&1.id == short_link_id)) do
+      {:noreply,
+       socket
+       |> assign(:rotator_form, to_form(rotator_form_from_link(link), as: :rotator))
+       |> assign(:rotator_modal_open, true)
+       |> assign(:rotator_modal_link, link)}
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
+    end
+  end
+
+  def handle_event("close_rotator_modal", _params, socket) do
+    {:noreply, socket |> assign(:rotator_modal_open, false) |> assign(:rotator_modal_link, nil)}
+  end
+
+  def handle_event("save_shortlink_rotator", %{"rotator" => params}, socket) do
+    case Shortlink.save_rotator_config(params) do
+      {:ok, :saved} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Rotator shortlink berhasil disimpan.")
+         |> assign_shortlink_rotator_data()
+         |> assign(:rotator_form, to_form(Shortlink.new_rotator_form_defaults(), as: :rotator))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
+    end
   end
 
   def handle_event("delete_remote_domain", %{"id" => id} = params, socket) do
@@ -196,11 +317,11 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
        |> assign_domains(Monitor.list_domains())
        |> assign_remote_domains()}
     else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal hapus domain: #{format_reason(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "ID domain tidak valid.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -218,7 +339,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
        |> put_flash(:info, "Live status domain id #{remote_id}: #{result.status}")}
     else
       _ ->
-        {:noreply, put_flash(socket, :error, "Live check gagal untuk domain id #{id}.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -284,8 +405,8 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
          |> assign(:sflink_profiles, Monitor.list_sflink_profiles())
          |> assign(:sflink_profile, nil)}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal hapus token: #{format_reason(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -306,16 +427,16 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Gagal menambahkan profile SFLINK.")
+         |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
          |> assign(:sflink_profile_form, to_form(changeset, as: :sflink_profile))}
 
       {:error, :token_limit} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Maksimal 10 profile SFLINK per user. Hapus profile lama untuk menambah profile baru.")}
+         |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "ERROR 911 SILAHKAN HUBUNGI RAKA")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -332,11 +453,11 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
        |> assign(:sflink_profiles, Monitor.list_sflink_profiles())
        |> assign_sflink_profile()}
     else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal aktivasi profile: #{format_reason(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "ID profile tidak valid.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -353,11 +474,11 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
        |> assign(:sflink_profiles, Monitor.list_sflink_profiles())
        |> assign_sflink_profile()}
     else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Gagal hapus profile: #{format_reason(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "ID profile tidak valid.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
@@ -367,19 +488,19 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
         {:noreply, put_flash(socket, :info, "Checker cycle berhasil di-queue.")}
 
       {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Gagal menjalankan checker cycle.")}
+        {:noreply, put_flash(socket, :error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")}
     end
   end
 
   def handle_event("test_group", _params, socket) do
     msg = socket.assigns.test_message
-    reply = if Notifier.send_test_message(:group, msg) == :ok, do: {:info, "Test message ke group terkirim."}, else: {:error, "Gagal kirim test message ke group."}
+    reply = if Notifier.send_test_message(:group, msg) == :ok, do: {:info, "Test message ke group terkirim."}, else: {:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG"}
     {:noreply, put_flash(socket, elem(reply, 0), elem(reply, 1))}
   end
 
   def handle_event("test_private", _params, socket) do
     msg = socket.assigns.test_message
-    reply = if Notifier.send_test_message(:private, msg) == :ok, do: {:info, "Test message ke private chat terkirim."}, else: {:error, "Gagal kirim test message ke private chat."}
+    reply = if Notifier.send_test_message(:private, msg) == :ok, do: {:info, "Test message ke private chat terkirim."}, else: {:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG"}
     {:noreply, put_flash(socket, elem(reply, 0), elem(reply, 1))}
   end
 
@@ -397,6 +518,10 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
 
   def handle_event("toggle_domain_menu", _params, socket) do
     {:noreply, assign(socket, :domain_menu_open, !socket.assigns.domain_menu_open)}
+  end
+
+  def handle_event("toggle_shortlink_menu", _params, socket) do
+    {:noreply, assign(socket, :shortlink_menu_open, !socket.assigns.shortlink_menu_open)}
   end
 
   def handle_event("toggle_admin_menu", _params, socket) do
@@ -484,6 +609,23 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
               <.link class={submenu_class(@current_page == :add_domain)} href="/admin/domain/add">Add Domain</.link>
               <.link class={submenu_class(@current_page == :status_domain)} href="/admin/domain/status">Domain Status</.link>
               <.link class={submenu_class(@current_page == :list_domain)} href="/admin/domain/list">List Domain</.link>
+            </div>
+          </div>
+
+          <div class={["menu-expand", @shortlink_menu_open && "open"]} data-pop-title="Shortlink">
+            <button type="button" class={menu_class(@current_page in [:shortlink_create, :shortlink_list, :shortlink_stats, :shortlink_rotator])} phx-click="toggle_shortlink_menu">
+              <span class="menu-arrow"></span>
+              <span class="menu-icon">
+                <.nav_icon name="shortlink" />
+              </span>
+              <span class="menu-label">Shortlink</span>
+            </button>
+            <div class="submenu-pop">
+              <p class="submenu-pop-title">Shortlink</p>
+              <.link class={submenu_class(@current_page == :shortlink_create)} href="/admin/shortlink/create">Create Shortlink</.link>
+              <.link class={submenu_class(@current_page == :shortlink_list)} href="/admin/shortlink/list">List Shortlink</.link>
+              <.link class={submenu_class(@current_page == :shortlink_stats)} href="/admin/shortlink/stats">Stats Shortlink</.link>
+              <.link class={submenu_class(@current_page == :shortlink_rotator)} href="/admin/shortlink/rotator">Rotator</.link>
             </div>
           </div>
 
@@ -621,6 +763,7 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                   </.form>
                 </article>
               </div>
+
             </section>
           <% end %>
 
@@ -760,6 +903,452 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          <% end %>
+
+          <%= if @current_page == :shortlink_create do %>
+            <section id="shortlink-create" class="card-dark shortlink-shell">
+              <div class="shortlink-head-row">
+                <div class="shortlink-head">
+                  <h2>Create Shortlink</h2>
+                  <p>Kelola tautan singkat berbasis slug dengan struktur yang konsisten dan mudah dipantau.</p>
+                </div>
+                <div class="shortlink-head-meta">
+                  <span class="shortlink-meta-pill">Slug Based</span>
+                  <span class="shortlink-meta-pill">Click Tracking</span>
+                </div>
+              </div>
+
+              <div class="shortlink-pattern">
+                <span class="pattern-label">Format URL</span>
+                <code>{shortlink_pattern_url()}</code>
+              </div>
+
+              <div class="shortlink-create-grid">
+                <article class="card-dark shortlink-form-card">
+                  <h3>Generate Link</h3>
+                  <p class="shortlink-card-subtitle">Isi destination URL, tentukan slug, lalu pilih tipe redirect.</p>
+                  <.form for={@shortlink_form} phx-submit="create_shortlink" class="shortlink-form-grid">
+                    <div class="shortlink-field">
+                      <label>Destination URL</label>
+                      <div class="shortlink-select-wrap">
+                        <span class="shortlink-select-prefix">https://</span>
+                        <select class="shortlink-domain-select" name="shortlink[destination_url]" required>
+                          <option :if={shortlink_domain_options(@domains, @remote_domains) == []} value="">Tidak ada domain tersedia</option>
+                          <option :if={shortlink_domain_options(@domains, @remote_domains) != []} value="" disabled={true}>Pilih domain tujuan</option>
+                          <optgroup :if={active_shortlink_domains(shortlink_domain_options(@domains, @remote_domains)) != []} label="Active Domains">
+                            <option
+                              :for={domain <- active_shortlink_domains(shortlink_domain_options(@domains, @remote_domains))}
+                              value={"https://#{domain}"}
+                              selected={to_string(@shortlink_form[:destination_url].value) == "https://#{domain}"}
+                            >
+                              {shortlink_domain_option_label(domain)}
+                            </option>
+                          </optgroup>
+                          <optgroup :if={inactive_shortlink_domains(shortlink_domain_options(@domains, @remote_domains)) != []} label="Inactive Domains">
+                            <option
+                              :for={domain <- inactive_shortlink_domains(shortlink_domain_options(@domains, @remote_domains))}
+                              value={"https://#{domain}"}
+                              selected={to_string(@shortlink_form[:destination_url].value) == "https://#{domain}"}
+                            >
+                              {shortlink_domain_option_label(domain)}
+                            </option>
+                          </optgroup>
+                        </select>
+                      </div>
+                      <p class="shortlink-help">Hanya domain dari List Domain yang bisa dipilih.</p>
+                    </div>
+
+                    <div class="shortlink-field">
+                      <label>Custom Slug (opsional)</label>
+                      <input
+                        type="text"
+                        name="shortlink[slug]"
+                        value={@shortlink_form[:slug].value}
+                        placeholder="promo-seo-2026"
+                        autocomplete="off"
+                      />
+                      <p class="shortlink-help">Kosongkan untuk generate slug random otomatis.</p>
+                    </div>
+
+                    <div class="shortlink-field">
+                      <label>Redirect Type</label>
+                      <select name="shortlink[redirect_type]">
+                        <option value="302" selected={to_string(@shortlink_form[:redirect_type].value) == "302"}>302 (Temporary)</option>
+                        <option value="301" selected={to_string(@shortlink_form[:redirect_type].value) == "301"}>301 (Permanent)</option>
+                      </select>
+                    </div>
+
+                    <div class="actions">
+                      <button type="submit" class="shortlink-submit-btn" disabled={shortlink_domain_options(@domains, @remote_domains) == []}>Generate Shortlink</button>
+                    </div>
+                  </.form>
+                </article>
+
+                <article class="card-dark shortlink-guide-card">
+                  <h3>Panduan Cepat</h3>
+                  <p class="shortlink-card-subtitle">Praktik yang disarankan supaya shortlink mudah dikelola tim.</p>
+                  <div class="shortlink-guide-list">
+                    <div class="shortlink-guide-item">
+                      <span class="guide-step">1</span>
+                      <div>
+                        <strong>Gunakan URL final</strong>
+                        <p>Hindari URL dengan banyak redirect berantai agar klik lebih cepat.</p>
+                      </div>
+                    </div>
+                    <div class="shortlink-guide-item">
+                      <span class="guide-step">2</span>
+                      <div>
+                        <strong>Pakai slug deskriptif</strong>
+                        <p>Gunakan pola yang mudah diingat untuk campaign jangka panjang.</p>
+                      </div>
+                    </div>
+                    <div class="shortlink-guide-item">
+                      <span class="guide-step">3</span>
+                      <div>
+                        <strong>Pilih redirect sesuai tujuan</strong>
+                        <p>302 untuk campaign aktif, 301 untuk URL permanen atau evergreen.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="shortlink-preview-box">
+                    <p class="preview-title">Preview URL</p>
+                    <code>{shortlink_pattern_url()}</code>
+                  </div>
+                </article>
+              </div>
+            </section>
+          <% end %>
+
+          <%= if @current_page == :shortlink_list do %>
+            <section id="shortlink-list" class="card-dark shortlink-shell">
+              <div class="shortlink-list-head">
+                <div>
+                  <h2 class="list-domain-title">List Shortlink</h2>
+                  <p class="shortlink-list-subtitle">Kelola seluruh shortlink, redirect type, dan performa klik dari satu tabel.</p>
+                </div>
+                <div class="shortlink-list-metrics">
+                  <span class="shortlink-metric-chip">Total: {length(@shortlink_list)}</span>
+                  <span class="shortlink-metric-chip">Clicks: {Enum.sum(Enum.map(@shortlink_list, &(&1.click_count || 0)))}</span>
+                </div>
+              </div>
+
+              <div class="list-domain-head shortlink-list-toolbar">
+                <.form for={to_form(%{"q" => @shortlink_query}, as: :shortlink_search)} phx-change="search_shortlink_list" class="list-domain-search-form shortlink-list-search-form">
+                  <input
+                    type="text"
+                    name="shortlink_search[q]"
+                    value={@shortlink_query}
+                    placeholder="Cari slug atau destination..."
+                    class="list-domain-search"
+                    phx-debounce="250"
+                    autocomplete="off"
+                  />
+                </.form>
+              </div>
+
+              <div class="table-wrap">
+                <table class="domain-list-table shortlink-table shortlink-list-table">
+                  <thead>
+                    <tr>
+                      <th>Slug</th>
+                      <th>Short URL</th>
+                      <th>Destination</th>
+                      <th>Redirect</th>
+                      <th>Clicks</th>
+                      <th class="action-col">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr :for={link <- @shortlink_list}>
+                      <td class="shortlink-slug-cell"><code class="shortlink-slug-code">{link.slug}</code></td>
+                      <td class="shortlink-url-cell">
+                        <span class="shortlink-url-text">{Shortlink.short_url_for_slug(link.slug)}</span>
+                      </td>
+                      <td class="shortlink-destination-cell">
+                        <span class="shortlink-destination-text">{link.destination_url}</span>
+                      </td>
+                      <td><span class={["badge", shortlink_redirect_badge_class(link.redirect_type)]}>{link.redirect_type}</span></td>
+                      <td><span class="badge shortlink-click-badge">{link.click_count} clicks</span></td>
+                      <td class="action-col">
+                        <button
+                          class="shortlink-action-btn"
+                          phx-click="set_shortlink_redirect_type"
+                          phx-value-id={link.id}
+                          phx-value-type={if link.redirect_type == 301, do: 302, else: 301}
+                        >
+                          Switch to {if link.redirect_type == 301, do: "302", else: "301"}
+                        </button>
+                      </td>
+                    </tr>
+                    <tr :if={@shortlink_list == []}>
+                      <td colspan="6" class="shortlink-empty-state">Belum ada shortlink.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          <% end %>
+
+          <%= if @current_page == :shortlink_stats do %>
+            <section id="shortlink-stats" class="card-dark shortlink-shell">
+              <div class="shortlink-stats-head">
+                <div>
+                  <h2 class="shortlink-stats-title">Shortlink Stats</h2>
+                  <p class="shortlink-stats-subtitle">Pantau performa shortlink, klik terbaru, dan link paling aktif secara realtime.</p>
+                </div>
+                <span class="shortlink-stats-chip">Updated Live</span>
+              </div>
+
+              <div class="shortlink-kpi-grid">
+                <article class="shortlink-kpi-card">
+                  <p class="kpi-label">Total Link</p>
+                  <p class="kpi-value">{@shortlink_stats[:total_links] || 0}</p>
+                </article>
+                <article class="shortlink-kpi-card">
+                  <p class="kpi-label">Link Aktif</p>
+                  <p class="kpi-value">{@shortlink_stats[:active_links] || 0}</p>
+                </article>
+                <article class="shortlink-kpi-card">
+                  <p class="kpi-label">Total Clicks</p>
+                  <p class="kpi-value">{@shortlink_stats[:total_clicks] || 0}</p>
+                </article>
+                <article class="shortlink-kpi-card">
+                  <p class="kpi-label">Clicks Hari Ini</p>
+                  <p class="kpi-value">{@shortlink_stats[:today_clicks] || 0}</p>
+                </article>
+              </div>
+
+              <div class="shortlink-stats-grid">
+                <article class="card-dark shortlink-top-card">
+                  <h3>Top Links</h3>
+                  <table class="shortlink-top-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Slug</th>
+                        <th>Clicks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr :for={{link, idx} <- Enum.with_index(@shortlink_stats[:top_links] || [], 1)}>
+                        <td><span class="shortlink-rank-chip">{"##{idx}"}</span></td>
+                        <td><code>{link.slug}</code></td>
+                        <td><span class="badge shortlink-click-badge">{link.click_count}</span></td>
+                      </tr>
+                      <tr :if={(@shortlink_stats[:top_links] || []) == []}>
+                        <td colspan="3" class="shortlink-empty-state">Belum ada data.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </article>
+
+                <article class="card-dark shortlink-log-card">
+                  <h3>Recent Click Log</h3>
+                  <div class="table-wrap shortlink-log-wrap">
+                    <table class="domain-list-table shortlink-log-table">
+                      <thead>
+                        <tr>
+                          <th>Waktu</th>
+                          <th>Slug</th>
+                          <th>IP</th>
+                          <th>Referrer</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr :for={click <- @shortlink_recent_clicks}>
+                          <td>{format_shortlink_time(click.clicked_at)}</td>
+                          <td><code>{click.short_link.slug}</code></td>
+                          <td><span class="shortlink-ip-chip">{click.ip_address || "-"}</span></td>
+                          <td><span class="shortlink-referrer-text">{click.referrer || "-"}</span></td>
+                        </tr>
+                        <tr :if={@shortlink_recent_clicks == []}>
+                          <td colspan="4" class="shortlink-empty-state">Belum ada click log.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              </div>
+            </section>
+          <% end %>
+
+          <%= if @current_page == :shortlink_rotator do %>
+            <section id="shortlink-rotator" class="card-dark shortlink-shell">
+              <div class="shortlink-list-head rotator-head">
+                <div class="rotator-head-main">
+                  <h2 class="list-domain-title">Rotator Shortlink</h2>
+                  <p class="shortlink-list-subtitle">Kelola domain fallback per shortlink. Saat domain utama terdeteksi blocked, sistem akan failover otomatis ke domain cadangan sesuai prioritas.</p>
+                </div>
+                <div class="rotator-metrics">
+                  <span class="rotator-metric-chip">
+                    <strong>{length(@shortlink_rotator_list)}</strong>
+                    <small>Links</small>
+                  </span>
+                  <span class="rotator-metric-chip">
+                    <strong>{length(@domains)}</strong>
+                    <small>Domains</small>
+                  </span>
+                  <span class="rotator-metric-chip">
+                    <strong>
+                      {Enum.count(@shortlink_rotator_list, fn link ->
+                        case Map.get(link, :rotator) do
+                          %{enabled: true} -> true
+                          _ -> false
+                        end
+                      end)}
+                    </strong>
+                    <small>Active</small>
+                  </span>
+                </div>
+              </div>
+
+              <div class="admin-grid profile-grid rotator-grid">
+                <article class="card-dark shortlink-form-card rotator-config-card">
+                  <div class="rotator-config-head">
+                    <div>
+                      <h3>Pengaturan Rotator</h3>
+                      <p class="shortlink-card-subtitle">Pilih shortlink, atur domain fallback, lalu aktifkan failover otomatis.</p>
+                      <div class="rotator-inline-stats">
+                        <span class="rotator-inline-chip">Trusted Fallback: {length(@rotator_fallback_domains)}</span>
+                        <span class="rotator-inline-chip">Shortlink Tersedia: {length(@shortlink_rotator_links)}</span>
+                      </div>
+                    </div>
+                    <span class="rotator-config-pill">Failover Rules</span>
+                  </div>
+
+                  <div class="rotator-form-panel">
+                    <.form for={@rotator_form} phx-submit="save_shortlink_rotator" class="shortlink-form-grid rotator-form-grid">
+                      <div class="shortlink-field rotator-field-block">
+                        <label>
+                          Shortlink
+                          <small class="rotator-label-meta">Slug sumber</small>
+                        </label>
+                        <select class="rotator-select" name="rotator[short_link_id]" required>
+                          <option value="">Pilih Slug Shortlink</option>
+                          <option
+                            :for={link <- @shortlink_rotator_links}
+                            value={link.id}
+                            selected={to_string(@rotator_form[:short_link_id].value) == to_string(link.id)}
+                          >
+                            {"#{link.slug} -> #{primary_domain_from_url(link.destination_url)}"}
+                          </option>
+                        </select>
+                      </div>
+
+                      <div class="shortlink-field rotator-field-block">
+                        <label>
+                          Fallback Domain
+                          <small class="rotator-label-meta">Urutan prioritas</small>
+                        </label>
+                        <select class="rotator-select rotator-select-multi" name="rotator[fallback_domain_ids][]" multiple size="1">
+                        <option :if={@rotator_fallback_domains == []} value="" disabled={true}>Tidak ada fallback domain trusted tersedia</option>
+                        <option
+                          :for={domain <- @rotator_fallback_domains}
+                          value={domain.id}
+                          selected={to_string(domain.id) in normalize_selected_ids(@rotator_form[:fallback_domain_ids].value)}
+                        >
+                          {domain.name}
+                          </option>
+                        </select>
+                        <p class="shortlink-help">Tekan Ctrl/Cmd untuk memilih lebih dari satu domain.</p>
+                      </div>
+
+                      <label class="checkbox-label rotator-checkbox">
+                        <input type="checkbox" name="rotator[enabled]" value="true" checked={to_string(@rotator_form[:enabled].value) == "true"} />
+                        Aktifkan rotator untuk shortlink ini
+                      </label>
+
+                      <div class="actions rotator-actions">
+                        <button type="submit" class="rotator-submit-btn">Simpan Rotator</button>
+                      </div>
+                    </.form>
+                  </div>
+
+                </article>
+
+                <article class="card-dark shortlink-guide-card">
+                  <div class="rotator-list-headline">
+                    <h3>Daftar Rotator Aktif</h3>
+                    <span class="rotator-hint-chip">Auto Failover</span>
+                  </div>
+                  <p class="shortlink-card-subtitle">Pantau konfigurasi slug, domain utama, fallback, dan status rotator pada satu tabel.</p>
+                  <.form for={to_form(%{"q" => @shortlink_rotator_query}, as: :shortlink_rotator_search)} phx-change="search_shortlink_rotator" class="list-domain-search-form shortlink-list-search-form">
+                    <input
+                      type="text"
+                      name="shortlink_rotator_search[q]"
+                      value={@shortlink_rotator_query}
+                      placeholder="Cari slug atau domain..."
+                      class="list-domain-search"
+                      phx-debounce="250"
+                      autocomplete="off"
+                    />
+                  </.form>
+
+                  <div class="table-wrap rotator-table-wrap">
+                    <table class="domain-list-table shortlink-table rotator-table">
+                      <thead>
+                        <tr>
+                          <th>Slug</th>
+                          <th>Primary Domain</th>
+                          <th>Status</th>
+                          <th class="action-col">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr :for={link <- @shortlink_rotator_list}>
+                          <td><code class="rotator-slug-code">{link.slug}</code></td>
+                          <td><span class="rotator-primary-domain">{primary_domain_from_url(link.destination_url)}</span></td>
+                          <td>
+                            <span class={["badge", "rotator-status-badge", rotator_status_badge(link)]}>{rotator_status_label(link)}</span>
+                          </td>
+                          <td class="action-col rotator-action-cell">
+                            <button class="rotator-edit-btn" type="button" phx-click="edit_shortlink_rotator" phx-value-id={link.id}>Edit</button>
+                          </td>
+                        </tr>
+                        <tr :if={@shortlink_rotator_list == []}>
+                          <td colspan="4" class="shortlink-empty-state">Belum ada shortlink.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p class="rotator-list-meta">Total konfigurasi: {length(@shortlink_rotator_list)}</p>
+                </article>
+              </div>
+
+              <div :if={@rotator_modal_open and is_map(@rotator_modal_link)} class="rotator-modal-layer">
+                <button type="button" class="rotator-modal-backdrop" phx-click="close_rotator_modal" aria-label="Tutup detail rotator"></button>
+                <section class="rotator-modal-card" role="dialog" aria-modal="true" aria-label="Detail rotator">
+                  <div class="rotator-modal-head">
+                    <h3>Detail Rotator</h3>
+                    <button type="button" class="rotator-modal-close" phx-click="close_rotator_modal">Tutup</button>
+                  </div>
+
+                  <div class="rotator-modal-grid">
+                    <div class="rotator-modal-item">
+                      <span class="rotator-modal-label">Slug</span>
+                      <code class="rotator-modal-value">{@rotator_modal_link.slug}</code>
+                    </div>
+                    <div class="rotator-modal-item">
+                      <span class="rotator-modal-label">Primary Domain</span>
+                      <span class="rotator-modal-value">{primary_domain_from_url(@rotator_modal_link.destination_url)}</span>
+                    </div>
+                    <div class="rotator-modal-item">
+                      <span class="rotator-modal-label">Status Rotator</span>
+                      <span class={["badge", "rotator-status-badge", rotator_status_badge(@rotator_modal_link)]}>{rotator_status_label(@rotator_modal_link)}</span>
+                    </div>
+                  </div>
+
+                  <div class="rotator-modal-fallback">
+                    <p class="rotator-modal-label">Fallback Domain</p>
+                    <ul>
+                      <li :for={domain <- rotator_fallback_list(@rotator_modal_link)}>{domain}</li>
+                      <li :if={rotator_fallback_list(@rotator_modal_link) == []}>Belum ada fallback domain.</li>
+                    </ul>
+                  </div>
+                </section>
               </div>
             </section>
           <% end %>
@@ -964,15 +1553,15 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
       {:ok, domains} ->
         assign(socket, :remote_domains, domains)
 
-      {:error, reason} ->
+      {:error, _reason} ->
         socket
         |> assign(:remote_domains, [])
-        |> maybe_flash_error(show_error, "Gagal load list domain dari SFLINK: #{format_reason(reason)}")
+        |> maybe_flash_error(show_error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
 
       _ ->
         socket
         |> assign(:remote_domains, [])
-        |> maybe_flash_error(show_error, "Gagal load list domain dari SFLINK.")
+        |> maybe_flash_error(show_error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
     end
   end
 
@@ -981,6 +1570,10 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   defp page_from_action(:status_domain), do: :status_domain
   defp page_from_action(:telegram), do: :telegram
   defp page_from_action(:profile), do: :profile
+  defp page_from_action(:shortlink_create), do: :shortlink_create
+  defp page_from_action(:shortlink_list), do: :shortlink_list
+  defp page_from_action(:shortlink_stats), do: :shortlink_stats
+  defp page_from_action(:shortlink_rotator), do: :shortlink_rotator
   defp page_from_action(_), do: :home
 
   defp page_title(:add_domain), do: "Add Domain"
@@ -988,6 +1581,10 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   defp page_title(:status_domain), do: "Domain Status"
   defp page_title(:telegram), do: "Telegram"
   defp page_title(:profile), do: "Profile"
+  defp page_title(:shortlink_create), do: "Create Shortlink"
+  defp page_title(:shortlink_list), do: "List Shortlink"
+  defp page_title(:shortlink_stats), do: "Shortlink Stats"
+  defp page_title(:shortlink_rotator), do: "Rotator Shortlink"
   defp page_title(:home), do: "Admin Home"
 
   defp menu_class(true), do: "menu-item active"
@@ -1046,6 +1643,11 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
           <path d="m21 4-3.2 15.3c-.2 1-1.2 1.5-2.1 1.1L11 18l-2.4 2.2c-.6.6-1.7.2-1.8-.7L6 14 2.2 12c-.9-.5-.8-1.8.2-2.1L20 3.4c.7-.2 1.3.4 1.2 1.1z"/>
           <path d="m6.2 14 11.4-8.3"/>
         </svg>
+      <% "shortlink" -> %>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 14a3 3 0 0 1 0-4l2-2a3 3 0 1 1 4.2 4.2l-1 1"/>
+          <path d="M14 10a3 3 0 0 1 0 4l-2 2a3 3 0 1 1-4.2-4.2l1-1"/>
+        </svg>
       <% "admin" -> %>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="8" r="3.2"/>
@@ -1076,10 +1678,10 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
   defp format_reason({:http_error, code, _message, _body}) when code in [401, 403],
     do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
 
-  defp format_reason({:http_error, code, message, _body}), do: "HTTP #{code} - #{message}"
-  defp format_reason({:sflink_error, message, _body}), do: message
-  defp format_reason({:invalid_response, body}), do: "Invalid response: #{inspect(body)}"
-  defp format_reason(reason), do: inspect(reason)
+  defp format_reason({:http_error, _code, _message, _body}), do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
+  defp format_reason({:sflink_error, _message, _body}), do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
+  defp format_reason({:invalid_response, _body}), do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
+  defp format_reason(_reason), do: "ERROR DIRECTLY CALL 911 RAKA GANTENG"
 
   defp sync_remote_domains(socket) do
     case Monitor.sync_remote_domains_to_local() do
@@ -1271,15 +1873,23 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
 
   defp live_check_all_remote_domains(socket) do
     statuses =
-      Enum.reduce(socket.assigns.remote_domains, socket.assigns.remote_statuses, fn rd, acc ->
-        case live_check_remote_domain_with_profile(rd.id, rd.source_profile_id) do
-          {:ok, result} -> Map.put(acc, remote_domain_key(rd), result.status)
-          _ -> acc
-        end
-      end)
+      socket.assigns.remote_domains
+      |> Monitor.live_check_remote_domains()
+      |> then(&Map.merge(socket.assigns.remote_statuses, &1))
 
     assign(socket, :remote_statuses, statuses)
   end
+
+  defp parse_id_param(value) when is_integer(value), do: {:ok, value}
+
+  defp parse_id_param(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {int, _} -> {:ok, int}
+      _ -> {:error, :invalid_id}
+    end
+  end
+
+  defp parse_id_param(_), do: {:error, :invalid_id}
 
   defp format_mm_ss(total_seconds) do
     sec = max(total_seconds, 0)
@@ -1505,5 +2115,230 @@ defmodule ElixirNawalaDK168Web.AdminDashboardLive do
         end
     end
   end
+
+  defp assign_shortlink_list(socket) do
+    query = socket.assigns.shortlink_query || ""
+    assign(socket, :shortlink_list, Shortlink.list_short_links(query))
+  end
+
+  defp assign_shortlink_stats(socket) do
+    socket
+    |> assign(:shortlink_stats, Shortlink.get_stats())
+    |> assign(:shortlink_recent_clicks, Shortlink.list_recent_clicks(50))
+  end
+
+  defp assign_shortlink_rotator_data(socket) do
+    query = socket.assigns.shortlink_rotator_query || ""
+    list = Shortlink.list_rotator_configs(query)
+    trusted_fallback_domains =
+      trusted_rotator_fallback_domains(
+        socket.assigns.domains,
+        socket.assigns.remote_domains,
+        socket.assigns.remote_statuses
+      )
+
+    socket
+    |> assign(:shortlink_rotator_list, list)
+    |> assign(:shortlink_rotator_links, Shortlink.list_rotator_configs(""))
+    |> assign(:rotator_fallback_domains, trusted_fallback_domains)
+  end
+
+  defp shortlink_pattern_url do
+    base = ElixirNawalaDK168Web.Endpoint.url() |> String.trim_trailing("/")
+    "#{base}/s/{slug}"
+  end
+
+  defp shortlink_domain_names(domains) when is_list(domains) do
+    domains
+    |> Enum.map(fn
+      %{name: name} -> to_string(name || "")
+      value when is_binary(value) -> value
+      _ -> ""
+    end)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.downcase/1)
+    |> Enum.uniq()
+  end
+
+  defp shortlink_domain_names(_), do: []
+
+  defp active_shortlink_domains(domains) when is_list(domains) do
+    domains
+  end
+
+  defp active_shortlink_domains(_), do: []
+
+  defp inactive_shortlink_domains(domains) when is_list(domains) do
+    []
+  end
+
+  defp inactive_shortlink_domains(_), do: []
+
+  defp shortlink_domain_option_label(domain) when is_binary(domain), do: domain
+
+  defp shortlink_domain_option_label(_), do: "-"
+
+  defp shortlink_domain_options(local_domains, remote_domains) do
+    shortlink_available_domain_names(local_domains, remote_domains)
+  end
+
+  defp shortlink_available_domain_names(local_domains, remote_domains) do
+    local = shortlink_domain_names(local_domains)
+
+    remote =
+      remote_domains
+      |> List.wrap()
+      |> Enum.map(fn
+        %{domain: domain} -> to_string(domain || "")
+        value when is_binary(value) -> value
+        _ -> ""
+      end)
+      |> shortlink_domain_names()
+
+    (local ++ remote)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp shortlink_redirect_badge_class(301), do: "shortlink-redirect-permanent"
+  defp shortlink_redirect_badge_class("301"), do: "shortlink-redirect-permanent"
+  defp shortlink_redirect_badge_class(_), do: "shortlink-redirect-temporary"
+
+  defp rotator_form_from_link(link) when is_map(link) do
+    fallback_ids =
+      case Map.get(link, :rotator) do
+        nil ->
+          []
+
+        rotator ->
+          rotator.rotator_domains
+          |> Enum.sort_by(& &1.priority)
+          |> Enum.map(&to_string(&1.domain_id))
+      end
+
+    %{
+      "short_link_id" => to_string(link.id),
+      "enabled" => if(Map.get(link, :rotator) && link.rotator.enabled, do: "true", else: "false"),
+      "fallback_domain_ids" => fallback_ids
+    }
+  end
+
+  defp rotator_form_from_link(_), do: Shortlink.new_rotator_form_defaults()
+
+  defp normalize_selected_ids(values) when is_list(values) do
+    values
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_selected_ids(value) when is_binary(value), do: [String.trim(value)]
+  defp normalize_selected_ids(_), do: []
+
+  defp primary_domain_from_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> host
+      _ -> "-"
+    end
+  end
+
+  defp primary_domain_from_url(_), do: "-"
+
+  defp rotator_fallback_domains(link) when is_map(link) do
+    case Map.get(link, :rotator) do
+      nil ->
+        "-"
+
+      rotator ->
+        rotator.rotator_domains
+        |> Enum.sort_by(& &1.priority)
+        |> Enum.map(fn row -> row.domain && row.domain.name end)
+        |> Enum.reject(&is_nil/1)
+        |> case do
+          [] -> "-"
+          names -> Enum.join(names, ", ")
+        end
+    end
+  end
+
+  defp rotator_fallback_domains(_), do: "-"
+
+  defp rotator_fallback_list(link) when is_map(link) do
+    case Map.get(link, :rotator) do
+      nil ->
+        []
+
+      rotator ->
+        rotator.rotator_domains
+        |> Enum.sort_by(& &1.priority)
+        |> Enum.map(fn row -> row.domain && row.domain.name end)
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
+  defp rotator_fallback_list(_), do: []
+
+  defp rotator_status_label(link) when is_map(link) do
+    case Map.get(link, :rotator) do
+      %{enabled: true} -> "Enabled"
+      %{enabled: false} -> "Disabled"
+      _ -> "Not Set"
+    end
+  end
+
+  defp rotator_status_label(_), do: "Not Set"
+
+  defp rotator_status_badge(link) when is_map(link) do
+    case Map.get(link, :rotator) do
+      %{enabled: true} -> "badge-green"
+      %{enabled: false} -> "badge-amber"
+      _ -> "badge-gray"
+    end
+  end
+
+  defp rotator_status_badge(_), do: "badge-gray"
+
+  defp trusted_rotator_fallback_domains(domains, remote_domains, remote_statuses) do
+    trusted_remote_names =
+      remote_domains
+      |> List.wrap()
+      |> Enum.filter(&(check_status_text(&1, remote_statuses) == "TRUSTED"))
+      |> Enum.map(fn rd -> rd.domain end)
+      |> Enum.map(&to_string/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&String.downcase/1)
+      |> MapSet.new()
+
+    domains
+    |> List.wrap()
+    |> Enum.filter(fn domain ->
+      name =
+        domain
+        |> Map.get(:name, "")
+        |> to_string()
+        |> String.trim()
+        |> String.downcase()
+
+      Map.get(domain, :active) == true and
+        (Map.get(domain, :last_status) in ["up"] or MapSet.member?(trusted_remote_names, name))
+    end)
+    |> Enum.sort_by(fn domain -> String.downcase(to_string(Map.get(domain, :name, ""))) end)
+  end
+
+  defp format_shortlink_time(nil), do: "-"
+
+  defp format_shortlink_time(%DateTime{} = dt) do
+    Calendar.strftime(dt, "%d-%m-%Y %H:%M:%S UTC")
+  end
+
+  defp format_shortlink_time(%NaiveDateTime{} = ndt) do
+    ndt
+    |> DateTime.from_naive!("Etc/UTC")
+    |> format_shortlink_time()
+  end
+
+  defp format_shortlink_time(_), do: "-"
 
 end

@@ -132,17 +132,13 @@ defmodule ElixirNawalaDK168.Telegram.Notifier do
             acc
           else
             list_status = rd.status |> to_string() |> String.downcase()
-            live_status = live_status_for_remote(rd)
-
             Map.update(
               acc,
               domain_name,
-              %{list_status: list_status, live_status: live_status},
+              list_status,
               fn existing ->
                 # Keep the most severe status per domain if duplicated across profiles.
-                merged_live = pick_more_severe_status(existing.live_status, live_status)
-                merged_list = pick_more_severe_status(existing.list_status, list_status)
-                %{list_status: merged_list, live_status: merged_live}
+                pick_more_severe_status(existing, list_status)
               end
             )
           end
@@ -156,57 +152,26 @@ defmodule ElixirNawalaDK168.Telegram.Notifier do
   defp resolved_status_label(domain, remote_statuses) do
     local_status = domain.last_status |> to_string() |> String.downcase()
 
-    %{live_status: remote_live_status, list_status: remote_list_status} =
+    remote_status =
       domain.name
       |> to_string()
       |> String.downcase()
-      |> then(&Map.get(remote_statuses, &1, %{live_status: "", list_status: ""}))
+      |> then(&Map.get(remote_statuses, &1, ""))
 
     local_bucket = status_bucket(local_status)
-    remote_live_bucket = status_bucket(remote_live_status)
-    remote_list_bucket = status_bucket(remote_list_status)
+    remote_bucket = status_bucket(remote_status)
 
     cond do
-      local_bucket == :blocked or remote_live_bucket == :blocked or remote_list_bucket == :blocked ->
+      local_bucket == :blocked or remote_bucket == :blocked ->
         "BLOCKED"
 
-      local_bucket == :trusted or remote_live_bucket == :trusted or remote_list_bucket == :trusted ->
+      local_bucket == :trusted or remote_bucket == :trusted ->
         "TRUSTED"
 
       true ->
         "BLOCKED"
     end
   end
-
-  defp live_status_for_remote(rd) when is_map(rd) do
-    remote_id = Map.get(rd, :id)
-    profile_id = Map.get(rd, :source_profile_id)
-
-    result =
-      cond do
-        is_integer(remote_id) and is_integer(profile_id) ->
-          Monitor.live_check_remote_domain_status(remote_id, profile_id)
-
-        is_integer(remote_id) ->
-          Monitor.live_check_remote_domain_status(remote_id)
-
-        true ->
-          {:error, :invalid_remote_id}
-      end
-
-    case result do
-      {:ok, payload} ->
-        payload
-        |> Map.get(:status, "")
-        |> to_string()
-        |> String.downcase()
-
-      _ ->
-        ""
-    end
-  end
-
-  defp live_status_for_remote(_), do: ""
 
   defp pick_more_severe_status(existing, incoming) do
     case {status_bucket(existing), status_bucket(incoming)} do

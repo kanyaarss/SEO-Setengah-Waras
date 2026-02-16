@@ -14,25 +14,25 @@ defmodule ElixirNawalaDK168Web.AdminDomainController do
 
       {:error, %Ecto.Changeset{}} ->
         conn
-        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> redirect(to: "/admin/dashboard")
 
       {:error, {:http_error, code, message, _body}} ->
         _ = {code, message}
         conn
-        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> redirect(to: "/admin/dashboard")
 
       {:error, {:sflink_error, message, _body}} ->
         _ = message
         conn
-        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> redirect(to: "/admin/dashboard")
 
       {:error, reason} ->
         _ = reason
         conn
-        |> put_flash(:error, "Gagal kirim domain ke SFLINK: ERROR DIRECTLY CALL 911 RAKA GANTENG")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> redirect(to: "/admin/dashboard")
     end
   end
@@ -48,18 +48,18 @@ defmodule ElixirNawalaDK168Web.AdminDomainController do
 
           {:error, :remote_domain_not_found} ->
             conn
-            |> put_flash(:error, "Domain tidak ditemukan di SFLINK.")
+            |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
             |> redirect(to: "/admin/dashboard")
 
-          {:error, reason} ->
+          {:error, _reason} ->
             conn
-            |> put_flash(:error, "Gagal hapus domain: #{inspect(reason)}")
+            |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
             |> redirect(to: "/admin/dashboard")
         end
 
       :error ->
         conn
-        |> put_flash(:error, "ID domain tidak valid.")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> redirect(to: "/admin/dashboard")
     end
   end

@@ -20,6 +20,7 @@ defmodule ElixirNawalaDK168Web.Router do
   scope "/", ElixirNawalaDK168Web do
     pipe_through :browser
 
+    get "/s/:slug", ShortlinkRedirectController, :show
     get "/", PageController, :home
     get "/admin/login", AdminSessionController, :new
     post "/admin/login", AdminSessionController, :create
@@ -39,5 +40,9 @@ defmodule ElixirNawalaDK168Web.Router do
     live "/domain/add", AdminDashboardLive, :add_domain
     live "/domain/list", AdminDashboardLive, :list_domain
     live "/domain/status", AdminDashboardLive, :status_domain
+    live "/shortlink/create", AdminDashboardLive, :shortlink_create
+    live "/shortlink/list", AdminDashboardLive, :shortlink_list
+    live "/shortlink/stats", AdminDashboardLive, :shortlink_stats
+    live "/shortlink/rotator", AdminDashboardLive, :shortlink_rotator
   end
 end

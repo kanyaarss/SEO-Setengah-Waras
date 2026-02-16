@@ -8,6 +8,12 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   go-orchestrator:
     build: 
@@ -24,7 +30,8 @@ services:
     volumes:
       - ./web:/app/web
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   nodejs-workers:
     build:
@@ -37,9 +44,12 @@ services:
       - NODE_HEADLESS=true
       - GO_HOST=go-orchestrator
       - GO_PORT=8080
+      - NODE_MAX_CONCURRENT=5
     depends_on:
-      - redis
-      - go-orchestrator
+      redis:
+        condition: service_healthy
+      go-orchestrator:
+        condition: service_started
     deploy:
       replicas: 2
 

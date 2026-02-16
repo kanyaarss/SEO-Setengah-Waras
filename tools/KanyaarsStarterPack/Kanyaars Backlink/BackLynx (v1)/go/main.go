@@ -80,6 +80,9 @@ var (
 )
 
 const controlChannel = "backlynx:control"
+const urlQueueKey = "url_queue"
+const resultQueueKey = "result_queue"
+const errorQueueKey = "backlynx:queue:error"
 
 func init() {
 	logger = logrus.New()
@@ -222,7 +225,7 @@ func enqueueURLs(ctx context.Context, tasks []URLTask) error {
 			continue
 		}
 
-		if err := redisClient.LPush(ctx, "url_queue", taskJSON).Err(); err != nil {
+		if err := redisClient.LPush(ctx, urlQueueKey, taskJSON).Err(); err != nil {
 			return fmt.Errorf("failed to enqueue task %s: %v", task.ID, err)
 		}
 	}
@@ -252,6 +255,7 @@ func processResults(ctx context.Context) error {
 		TargetDomainAlt string    `json:"targetDomain"`
 		Status          string    `json:"status"`
 		ResponseTime    float64   `json:"response_time"`
+		ResponseTimeAlt float64   `json:"responseTime"`
 		Error           string    `json:"error,omitempty"`
 	}
 
@@ -260,7 +264,7 @@ func processResults(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			resultJSON, err := redisClient.BRPop(ctx, 0, "result_queue").Result()
+			resultJSON, err := redisClient.BRPop(ctx, 0, resultQueueKey).Result()
 			if err != nil {
 				if err == redis.Nil {
 					continue
@@ -291,7 +295,10 @@ func processResults(ctx context.Context) error {
 				TargetDomain: targetDomain,
 				Status:       payload.Status,
 				ResponseTime: payload.ResponseTime,
-				Error:        payload.Error,
+				Error:        normalizeErrorMessage(payload.Error),
+			}
+			if result.ResponseTime == 0 && payload.ResponseTimeAlt > 0 {
+				result.ResponseTime = payload.ResponseTimeAlt
 			}
 
 			statusMutex.RLock()
@@ -313,11 +320,15 @@ func saveResultToMemory(result Result) {
 	resultsMutex.Lock()
 	defer resultsMutex.Unlock()
 	results = append(results, result)
-	if result.Status == "failed" && result.Error != "" {
-		logger.Infof("Saved result to memory: %s - %s (error=%s)", result.URL, result.Status, result.Error)
-	} else {
-		logger.Infof("Saved result to memory: %s - %s", result.URL, result.Status)
+	normalizedStatus := strings.ToUpper(result.Status)
+	if normalizedStatus == "" {
+		normalizedStatus = "UNKNOWN"
 	}
+	if result.Status == "failed" && result.Error != "" {
+		logger.Infof("Result: %s | %s | %s | %.0fms", result.URL, normalizedStatus, result.Error, result.ResponseTime)
+		return
+	}
+	logger.Infof("Result: %s | %s | %.0fms", result.URL, normalizedStatus, result.ResponseTime)
 }
 
 func updateProcessStatus(result Result) {
@@ -386,6 +397,18 @@ func startAPI() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if len(tasks) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no valid URLs found"})
+			return
+		}
+
+		// Ensure the queue is always clean before starting a new run.
+		clearCtx, clearCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer clearCancel()
+		if err := clearRedisQueues(clearCtx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to clear runtime queue: %v", err)})
+			return
+		}
 
 		// Initialize process status based on valid tasks.
 		statusMutex.Lock()
@@ -395,9 +418,6 @@ func startAPI() {
 			Success:   0,
 			Failed:    0,
 			Total:     len(tasks),
-		}
-		if len(tasks) == 0 {
-			processStatus.Status = "completed"
 		}
 		statusMutex.Unlock()
 
@@ -461,19 +481,24 @@ func startAPI() {
 		logMutex.RLock()
 		defer logMutex.RUnlock()
 
-		// Return last 20 log messages as JSON
-		var recentLogs []string
-		if len(logMessages) <= 20 {
-			recentLogs = make([]string, len(logMessages))
-			copy(recentLogs, logMessages)
-		} else {
-			recentLogs = make([]string, 20)
-			copy(recentLogs, logMessages[len(logMessages)-20:])
+		offset := 0
+		if v := c.Query("offset"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+				offset = parsed
+			}
+		}
+		total := len(logMessages)
+		if offset > total {
+			offset = total
 		}
 
+		newLogs := make([]string, total-offset)
+		copy(newLogs, logMessages[offset:])
+
 		c.JSON(http.StatusOK, gin.H{
-			"logs":  recentLogs,
-			"total": len(logMessages),
+			"logs":   newLogs,
+			"total":  total,
+			"offset": offset,
 		})
 	})
 
@@ -487,7 +512,7 @@ func getQueueSize() int64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	size, err := redisClient.LLen(ctx, "url_queue").Result()
+	size, err := redisClient.LLen(ctx, urlQueueKey).Result()
 	if err != nil {
 		logger.Errorf("Failed to get queue size: %v", err)
 		return 0
@@ -511,7 +536,7 @@ func clearRuntimeState() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := redisClient.Del(ctx, "url_queue", "result_queue", "backlynx:queue:error").Err(); err != nil {
+	if err := clearRedisQueues(ctx); err != nil {
 		logger.Errorf("Failed to clear Redis queues: %v", err)
 	}
 
@@ -528,6 +553,10 @@ func clearRuntimeState() {
 		Total:     0,
 	}
 	statusMutex.Unlock()
+}
+
+func clearRedisQueues(ctx context.Context) error {
+	return redisClient.Del(ctx, urlQueueKey, resultQueueKey, errorQueueKey).Err()
 }
 
 func exportToCSV() error {
@@ -563,7 +592,7 @@ func buildCSVData(input []Result) (string, error) {
 			result.TargetDomain,
 			result.Status,
 			fmt.Sprintf("%.2f", result.ResponseTime),
-			result.Error,
+			normalizeErrorMessage(result.Error),
 		}
 		if err := writer.Write(row); err != nil {
 			return "", err
@@ -576,6 +605,24 @@ func buildCSVData(input []Result) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+func normalizeErrorMessage(raw string) string {
+	msg := strings.ToLower(strings.TrimSpace(raw))
+	if msg == "" {
+		return ""
+	}
+
+	if strings.Contains(msg, "comment awaiting moderation") ||
+		strings.Contains(msg, "injectbacklink error") ||
+		strings.Contains(msg, "anchor text not found after submit") ||
+		strings.Contains(msg, "net::err_http_response_code_failure") ||
+		strings.Contains(msg, "net::err_cert_authority_invalid") ||
+		(strings.Contains(msg, "page.goto") && strings.Contains(msg, "timeout 60000ms exceeded")) {
+		return "This LINK ALREADY DEATH bruh"
+	}
+
+	return "SILAHKAN LAKUKAN CHECK MANUAL"
 }
 
 func main() {

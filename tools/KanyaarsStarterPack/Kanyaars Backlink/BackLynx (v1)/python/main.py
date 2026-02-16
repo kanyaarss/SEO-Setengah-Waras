@@ -69,6 +69,7 @@ class SimpleQualityAssessor:
         return self._count
 
 # Configure logging
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -117,6 +118,9 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     services: dict
+
+class AnalyzeRequest(BaseModel):
+    content: str
 
 async def initialize_services():
     """Initialize all AI services"""
@@ -225,9 +229,10 @@ async def generate_content(request: ContentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze")
-async def analyze_content(content: str):
+async def analyze_content(request: AnalyzeRequest):
     """Analyze existing content"""
     try:
+        content = request.content
         # NLP analysis
         nlp_analysis = await nlp_processor.analyze(content)
 

@@ -11,6 +11,7 @@ defmodule ElixirNawalaDK168.Application do
       {Finch, name: ElixirNawalaDK168.Finch},
       {Oban, Application.fetch_env!(:elixir_nawala_dk168, Oban)},
       ElixirNawalaDK168.Checker.Scheduler,
+      ElixirNawalaDK168.Telegram.Scheduler,
       ElixirNawalaDK168Web.Endpoint
     ]
 

@@ -8,8 +8,7 @@ defmodule ElixirNawalaDK168Web.AdminAuth do
     conn
     |> renew_session()
     |> put_session(:admin_id, admin.id)
-  end
-
+end
   def log_out_admin(conn) do
     configure_session(conn, drop: true)
   end
@@ -24,7 +23,7 @@ defmodule ElixirNawalaDK168Web.AdminAuth do
       conn
     else
       conn
-      |> put_flash(:error, "Please login as admin first.")
+      |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
       |> redirect(to: "/admin/login")
       |> halt()
     end
@@ -41,7 +40,7 @@ defmodule ElixirNawalaDK168Web.AdminAuth do
     else
       {:halt,
        socket
-       |> Phoenix.LiveView.put_flash(:error, "Please login as admin first.")
+       |> Phoenix.LiveView.put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
        |> Phoenix.LiveView.redirect(to: "/admin/login")}
     end
   end
@@ -52,4 +51,3 @@ defmodule ElixirNawalaDK168Web.AdminAuth do
     |> clear_session()
   end
 end
-

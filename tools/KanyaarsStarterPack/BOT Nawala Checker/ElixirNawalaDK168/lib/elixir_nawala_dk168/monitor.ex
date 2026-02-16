@@ -322,6 +322,24 @@ defmodule ElixirNawalaDK168.Monitor do
     with_token_fallback(fn token -> Client.live_check_status(remote_domain_id, token) end)
   end
 
+  def live_check_remote_domains(remote_domains) when is_list(remote_domains) do
+    remote_domains
+    |> Task.async_stream(
+      &live_check_remote_domain_entry/1,
+      max_concurrency: 6,
+      timeout: 8_000,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.reduce(%{}, fn
+      {:ok, {key, status}}, acc when is_binary(key) and is_binary(status) and status != "" ->
+        Map.put(acc, key, status)
+
+      _, acc ->
+        acc
+    end)
+  end
+
   def live_check_remote_domain_status(remote_domain_id, profile_id)
       when is_integer(remote_domain_id) and is_integer(profile_id) do
     with {:ok, token} <- token_for_active_profile(profile_id) do
@@ -807,6 +825,45 @@ defmodule ElixirNawalaDK168.Monitor do
       nil ->
         {:error, :profile_not_found}
     end
+  end
+
+  defp live_check_remote_domain_entry(remote_domain) when is_map(remote_domain) do
+    key = remote_domain_key(remote_domain)
+    remote_id = remote_domain[:id]
+    profile_id = remote_domain[:source_profile_id]
+
+    result =
+      cond do
+        is_integer(remote_id) and is_integer(profile_id) ->
+          live_check_remote_domain_status(remote_id, profile_id)
+
+        is_integer(remote_id) ->
+          live_check_remote_domain_status(remote_id)
+
+        true ->
+          {:error, :invalid_remote_id}
+      end
+
+    case result do
+      {:ok, payload} ->
+        status =
+          payload
+          |> Map.get(:status, "")
+          |> to_string()
+          |> String.downcase()
+
+        {key, status}
+
+      _ ->
+        {key, ""}
+    end
+  end
+
+  defp live_check_remote_domain_entry(_), do: {"default:unknown", ""}
+
+  defp remote_domain_key(remote_domain) when is_map(remote_domain) do
+    remote_domain[:domain_key] ||
+      "#{Map.get(remote_domain, :source_profile_id, "default")}:#{Map.get(remote_domain, :id, "unknown")}"
   end
 
   defp extract_domains_remaining(%{raw: raw, stats: stats}) do

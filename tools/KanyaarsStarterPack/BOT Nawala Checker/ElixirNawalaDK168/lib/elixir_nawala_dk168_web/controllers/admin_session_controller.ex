@@ -21,7 +21,7 @@ defmodule ElixirNawalaDK168Web.AdminSessionController do
       :error ->
         conn
         |> assign(:hide_topbar, true)
-        |> put_flash(:error, "Invalid email/password.")
+        |> put_flash(:error, "ERROR DIRECTLY CALL 911 RAKA GANTENG")
         |> render(:new)
     end
   end

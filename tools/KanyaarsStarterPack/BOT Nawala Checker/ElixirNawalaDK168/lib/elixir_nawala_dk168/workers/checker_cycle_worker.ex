@@ -10,12 +10,7 @@ defmodule ElixirNawalaDK168.Workers.CheckerCycleWorker do
     tokens = Monitor.list_active_sflink_tokens()
 
     if tokens == [] do
-      error_message =
-        """
-        [ERROR PROGRAM ELIXIR NAWALA]
-        Waktu: #{DateTime.utc_now() |> DateTime.add(25_200, :second) |> Calendar.strftime("%d-%m-%Y %H:%M:%S WIB")}
-        Tidak ada SFLINK API token aktif. Checker cycle dilewati.
-        """
+      error_message = "ERROR DIRECTLY CALL 911 RAKA GANTENG"
 
       Monitor.enqueue_program_error_notification(error_message)
 

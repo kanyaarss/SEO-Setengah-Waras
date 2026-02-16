@@ -2,6 +2,7 @@ const Redis = require('redis');
 const axios = require('axios');
 const { chromium } = require('playwright-core');
 const UserAgent = require('user-agents');
+const fs = require('fs');
 
 class NodeJSWorker {
     constructor() {
@@ -14,9 +15,21 @@ class NodeJSWorker {
         this.maxConcurrent = 5;
         this.stopRequested = false;
         this.activePages = new Set();
+        this.healthCheckTimer = null;
     }
 
     loadConfig() {
+        const rawConcurrency = parseInt(
+            process.env.NODE_MAX_CONCURRENT ||
+            process.env.WORKER_CONCURRENCY ||
+            process.env.MAX_CONCURRENT_URLS ||
+            '5',
+            10
+        );
+        const maxConcurrent = Number.isFinite(rawConcurrency) && rawConcurrency > 0
+            ? Math.min(rawConcurrency, 25)
+            : 5;
+
         return {
             redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
             redisQueue: process.env.REDIS_QUEUE || 'url_queue',
@@ -26,7 +39,8 @@ class NodeJSWorker {
             goHost: process.env.GO_HOST || 'go-orchestrator',
             goPort: process.env.GO_PORT || '8080',
             headless: process.env.NODE_HEADLESS === 'true',
-            maxConcurrent: parseInt(process.env.MAX_CONCURRENT_URLS) || 5
+            maxConcurrent,
+            browserExecutablePath: process.env.BROWSER_EXECUTABLE_PATH || '/usr/bin/chromium-browser'
         };
     }
 
@@ -48,9 +62,8 @@ class NodeJSWorker {
             console.log(`Subscribed to control channel: ${this.config.controlChannel}`);
 
             // Initialize Playwright browser
-            this.browser = await chromium.launch({
+            const browserOptions = {
                 headless: this.config.headless,
-                executablePath: '/usr/bin/chromium-browser',
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -66,7 +79,12 @@ class NodeJSWorker {
                     '--disable-features=TranslateUI',
                     '--disable-ipc-flooding-protection'
                 ]
-            });
+            };
+            if (this.config.browserExecutablePath && fs.existsSync(this.config.browserExecutablePath)) {
+                browserOptions.executablePath = this.config.browserExecutablePath;
+            }
+
+            this.browser = await chromium.launch(browserOptions);
             console.log('Browser initialized successfully');
             
             console.log('NodeJS Worker initialized successfully');
@@ -138,7 +156,7 @@ class NodeJSWorker {
                         
                         // Validate required task fields
                         if (!task || !task.url || !task.anchor || !task.targetDomain) {
-                            console.warn('Invalid task structure, missing required fields:', task);
+                            console.warn(this.normalizeErrorMessage('invalid task structure'));
                             continue;
                         }
 
@@ -152,23 +170,22 @@ class NodeJSWorker {
                         
                         // Process task asynchronously
                         this.processTask(task).catch(error => {
-                            console.error(`Error processing task ${task.url}:`, error);
+                            console.error(`Error processing task ${task.url}: ${this.normalizeErrorMessage(error && error.message ? error.message : error)}`);
                         }).finally(() => {
                             this.processingCount--;
                         });
                     } catch (parseError) {
-                        console.error('JSON parse error:', parseError.message);
-                        console.error('Raw data received:', taskData.element);
+                        console.error(this.normalizeErrorMessage('json parse error'));
                         // Move invalid data to error queue for debugging
                         try {
                             await this.redis.lPush(this.config.redisErrorQueue, taskData.element);
                         } catch (redisError) {
-                            console.error('Failed to move invalid data to error queue:', redisError.message);
+                            console.error(this.normalizeErrorMessage('failed to move invalid data to error queue'));
                         }
                     }
                 }
             } catch (error) {
-                console.error('Queue processor error:', error);
+                console.error(this.normalizeErrorMessage('queue processor error'));
                 await this.sleep(5000); // Wait before retrying
             }
         }
@@ -184,7 +201,7 @@ class NodeJSWorker {
             target_domain: task.targetDomain,
             targetDomain: task.targetDomain,
             status: 'failed',
-            responseTime: 0,
+            response_time: 0,
             error: null,
             timestamp: new Date().toISOString()
         };
@@ -234,12 +251,12 @@ class NodeJSWorker {
                     console.log(`Submission verified: ${task.url}`);
                 } else {
                     result.status = 'failed';
-                    result.error = verify.reason || 'Post-submit verification failed';
+                    result.error = this.normalizeErrorMessage(verify.reason || 'Post-submit verification failed');
                     console.warn(`Verification failed for ${task.url}: ${result.error}`);
                 }
             } else {
                 result.status = 'failed';
-                result.error = injectionResult.reason || 'No suitable injection point found';
+                result.error = this.normalizeErrorMessage(injectionResult.reason || 'no injection point');
                 console.warn(`Injection failed for ${task.url}: ${result.error}`);
             }
             
@@ -249,16 +266,8 @@ class NodeJSWorker {
                 shouldSendResult = false;
                 console.log(`Task aborted by stop signal: ${task.url}`);
             }
-            if (
-                msg.includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE') ||
-                msg.includes('net::ERR_CERT_AUTHORITY_INVALID') ||
-                (msg.includes('page.goto') && msg.includes('Timeout 60000ms exceeded'))
-            ) {
-                result.error = 'This LINK ALREADY DEATH bruh';
-            } else {
-                result.error = msg;
-            }
-            console.error(`Failed to process ${task.url}:`, msg);
+            result.error = this.normalizeErrorMessage(msg);
+            console.error(`Failed to process ${task.url}: ${result.error}`);
         } finally {
             if (page) {
                 try {
@@ -273,14 +282,14 @@ class NodeJSWorker {
             }
         }
         
-        result.responseTime = Date.now() - startTime;
+        result.response_time = Date.now() - startTime;
         
         // Send result back to Go orchestrator
         if (shouldSendResult) {
             await this.sendResult(result);
         }
         
-        console.log(`Task completed: ${task.url} - ${result.status} (${result.responseTime}ms)`);
+        console.log(`Task completed: ${task.url} - ${result.status} (${result.response_time}ms)`);
     }
 
     async injectBacklink(page, task) {
@@ -298,47 +307,57 @@ class NodeJSWorker {
                 'textarea[name="message"]',
                 'textarea[name="content"]',
                 'textarea[id="comment"]',
-                'textarea[id="message"]'
+                'textarea[id="message"]',
+                '#commentform textarea',
+                'form[id*="comment"] textarea',
+                'form[class*="comment"] textarea'
             ];
-            
-            for (const selector of commentSelectors) {
-                this.ensureActive();
-                try {
-                    await page.waitForSelector(selector, { timeout: 5000 });
-                    attempts.push(`comment:${selector}:found`);
-                    
-                    // Create backlink content
-                    const backlinkContent = `<a href="${task.targetDomain}">${task.anchor}</a> Great content!`;
-                    
-                    await page.fill(selector, backlinkContent);
-                    attempts.push(`comment:${selector}:filled`);
 
-                    // Fill required author/email if present
-                    await this.fillRequiredFields(page, attempts, task);
-                    
-                    // Look for submit button
-                    const submitSelectors = [
-                        'input[type="submit"]',
-                        'button[type="submit"]',
-                        'input[name="submit"]',
-                        'button[name="submit"]'
-                    ];
-                    
-                    for (const submitSelector of submitSelectors) {
-                        this.ensureActive();
-                        try {
-                            await page.click(submitSelector);
-                            await page.waitForTimeout(3000);
-                            attempts.push(`comment:${selector}:submitted:${submitSelector}`);
-                            return { ok: true };
-                        } catch (e) {
-                            attempts.push(`comment:${selector}:submit-failed:${submitSelector}:${e.message}`);
-                            continue;
+            const contexts = this.getCandidateContexts(page);
+            
+            for (const context of contexts) {
+                const contextLabel = this.getContextLabel(context);
+                for (const selector of commentSelectors) {
+                    this.ensureActive();
+                    try {
+                        await context.waitForSelector(selector, { timeout: 4000 });
+                        attempts.push(`comment:${contextLabel}:${selector}:found`);
+
+                        // Create backlink content
+                        const backlinkContent = `<a href="${task.targetDomain}">${task.anchor}</a> Great content!`;
+
+                        await context.fill(selector, backlinkContent);
+                        attempts.push(`comment:${contextLabel}:${selector}:filled`);
+
+                        // Fill required author/email if present
+                        await this.fillRequiredFields(context, attempts, task, contextLabel);
+
+                        // Look for submit button
+                        const submitSelectors = [
+                            'input[type="submit"]',
+                            'button[type="submit"]',
+                            'input[name="submit"]',
+                            'button[name="submit"]',
+                            '#submit',
+                            '.submit'
+                        ];
+
+                        for (const submitSelector of submitSelectors) {
+                            this.ensureActive();
+                            try {
+                                await context.click(submitSelector, { timeout: 2500 });
+                                await page.waitForTimeout(3000);
+                                attempts.push(`comment:${contextLabel}:${selector}:submitted:${submitSelector}`);
+                                return { ok: true };
+                            } catch (e) {
+                                attempts.push(`comment:${contextLabel}:${selector}:submit-failed:${submitSelector}:${e.message}`);
+                                continue;
+                            }
                         }
+                    } catch (e) {
+                        attempts.push(`comment:${contextLabel}:${selector}:not-found:${e.message}`);
+                        continue;
                     }
-                } catch (e) {
-                    attempts.push(`comment:${selector}:not-found:${e.message}`);
-                    continue;
                 }
             }
             
@@ -346,38 +365,42 @@ class NodeJSWorker {
             const contactSelectors = [
                 'textarea[name="message"]',
                 'textarea[name="inquiry"]',
-                'textarea[id="message"]'
+                'textarea[id="message"]',
+                'form textarea'
             ];
             
-            for (const selector of contactSelectors) {
-                this.ensureActive();
-                try {
-                    await page.waitForSelector(selector, { timeout: 5000 });
-                    attempts.push(`contact:${selector}:found`);
-                    
-                    const message = `Hi, I wanted to share this useful resource: <a href="${task.targetDomain}">${task.anchor}</a>`;
-                    
-                    await page.fill(selector, message);
-                    attempts.push(`contact:${selector}:filled`);
-                    
-                    const submitBtn = await page.$('input[type="submit"], button[type="submit"]');
-                    if (submitBtn) {
-                        await submitBtn.click();
-                        await page.waitForTimeout(3000);
-                        attempts.push(`contact:${selector}:submitted`);
-                        return { ok: true };
+            for (const context of contexts) {
+                const contextLabel = this.getContextLabel(context);
+                for (const selector of contactSelectors) {
+                    this.ensureActive();
+                    try {
+                        await context.waitForSelector(selector, { timeout: 4000 });
+                        attempts.push(`contact:${contextLabel}:${selector}:found`);
+                        
+                        const message = `Hi, I wanted to share this useful resource: <a href="${task.targetDomain}">${task.anchor}</a>`;
+                        
+                        await context.fill(selector, message);
+                        attempts.push(`contact:${contextLabel}:${selector}:filled`);
+                        
+                        const submitBtn = await context.$('input[type="submit"], button[type="submit"], .submit');
+                        if (submitBtn) {
+                            await submitBtn.click();
+                            await page.waitForTimeout(3000);
+                            attempts.push(`contact:${contextLabel}:${selector}:submitted`);
+                            return { ok: true };
+                        }
+                        attempts.push(`contact:${contextLabel}:${selector}:submit-not-found`);
+                    } catch (e) {
+                        attempts.push(`contact:${contextLabel}:${selector}:not-found:${e.message}`);
+                        continue;
                     }
-                    attempts.push(`contact:${selector}:submit-not-found`);
-                } catch (e) {
-                    attempts.push(`contact:${selector}:not-found:${e.message}`);
-                    continue;
                 }
             }
             
             return { ok: false, reason: `no injection point; attempts=${attempts.join('|')}` };
             
         } catch (error) {
-            console.error('Backlink injection error:', error);
+            console.error(`Backlink injection error: ${this.normalizeErrorMessage(`injectBacklink error: ${error.message}`)}`);
             return { ok: false, reason: `injectBacklink error: ${error.message}` };
         }
     }
@@ -422,40 +445,73 @@ class NodeJSWorker {
             this.ensureActive();
             await page.waitForTimeout(3000);
 
-            const moderation = await page.evaluate(() => {
-                const text = document.body ? document.body.innerText.toLowerCase() : '';
-                const patterns = [
-                    'awaiting moderation',
-                    'pending moderation',
-                    'your comment is awaiting moderation',
-                    'comment awaiting moderation'
-                ];
-                return patterns.some(p => text.includes(p));
-            });
+            const contexts = this.getCandidateContexts(page);
+            const patterns = [
+                'awaiting moderation',
+                'pending moderation',
+                'your comment is awaiting moderation',
+                'comment awaiting moderation'
+            ];
+
+            let moderation = false;
+            for (const context of contexts) {
+                try {
+                    const found = await context.evaluate((candidatePatterns) => {
+                        const text = document.body ? document.body.innerText.toLowerCase() : '';
+                        return candidatePatterns.some(p => text.includes(p));
+                    }, patterns);
+                    if (found) {
+                        moderation = true;
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
             if (moderation) {
                 return { ok: false, reason: 'comment awaiting moderation' };
             }
 
             const anchor = task.anchor;
             const target = task.targetDomain;
-
-            const anchorLinkFound = await page.evaluate(({ anchor, target }) => {
-                const links = Array.from(document.querySelectorAll('a'));
-                return links.some(a => {
-                    const href = a.getAttribute('href') || '';
-                    const text = (a.textContent || '').trim();
-                    return href.includes(target) && text.includes(anchor);
-                });
-            }, { anchor, target });
+            let anchorLinkFound = false;
+            for (const context of contexts) {
+                try {
+                    const found = await context.evaluate(({ anchorText, targetDomain }) => {
+                        const links = Array.from(document.querySelectorAll('a'));
+                        return links.some(a => {
+                            const href = a.getAttribute('href') || '';
+                            const text = (a.textContent || '').trim();
+                            return href.includes(targetDomain) && text.includes(anchorText);
+                        });
+                    }, { anchorText: anchor, targetDomain: target });
+                    if (found) {
+                        anchorLinkFound = true;
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
 
             if (anchorLinkFound) {
                 return { ok: true };
             }
-
-            const anchorTextFound = await page.evaluate(({ anchor }) => {
-                const text = document.body ? document.body.innerText : '';
-                return text.includes(anchor);
-            }, { anchor });
+            let anchorTextFound = false;
+            for (const context of contexts) {
+                try {
+                    const found = await context.evaluate(({ anchorText }) => {
+                        const text = document.body ? document.body.innerText : '';
+                        return text.includes(anchorText);
+                    }, { anchorText: anchor });
+                    if (found) {
+                        anchorTextFound = true;
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
 
             if (anchorTextFound) {
                 return { ok: true, note: 'anchor text found without link (sanitized)' };
@@ -490,39 +546,64 @@ class NodeJSWorker {
         }
     }
 
-    async fillRequiredFields(page, attempts, task) {
+    async fillRequiredFields(context, attempts, task, contextLabel = 'main') {
         const dummyName = process.env.DUMMY_NAME || 'BackLynx Bot';
         const dummyEmail = process.env.DUMMY_EMAIL || 'backlynx@example.com';
 
         try {
-            const authorInput = await page.$('input#author, input[name="author"]');
+            const authorInput = await context.$('input#author, input[name="author"], input[id*="author"], input[name*="author"]');
             if (authorInput) {
                 await authorInput.fill(dummyName);
-                attempts.push('field:author:filled');
+                attempts.push(`field:${contextLabel}:author:filled`);
             }
         } catch (e) {
-            attempts.push(`field:author:failed:${e.message}`);
+            attempts.push(`field:${contextLabel}:author:failed:${e.message}`);
         }
 
         try {
-            const emailInput = await page.$('input#email, input[name="email"]');
+            const emailInput = await context.$('input#email, input[name="email"], input[id*="mail"], input[name*="mail"]');
             if (emailInput) {
                 await emailInput.fill(dummyEmail);
-                attempts.push('field:email:filled');
+                attempts.push(`field:${contextLabel}:email:filled`);
             }
         } catch (e) {
-            attempts.push(`field:email:failed:${e.message}`);
+            attempts.push(`field:${contextLabel}:email:failed:${e.message}`);
         }
 
         try {
-            const urlInput = await page.$('input#url, input[name="url"]');
+            const urlInput = await context.$('input#url, input[name="url"], input[id*="website"], input[name*="website"]');
             if (urlInput && task && task.targetDomain) {
                 await urlInput.fill(task.targetDomain);
-                attempts.push('field:url:filled');
+                attempts.push(`field:${contextLabel}:url:filled`);
             }
         } catch (e) {
-            attempts.push(`field:url:failed:${e.message}`);
+            attempts.push(`field:${contextLabel}:url:failed:${e.message}`);
         }
+    }
+
+    getCandidateContexts(page) {
+        const contexts = [page];
+        for (const frame of page.frames()) {
+            if (!frame || frame === page.mainFrame()) {
+                continue;
+            }
+            contexts.push(frame);
+        }
+        return contexts;
+    }
+
+    getContextLabel(context) {
+        try {
+            if (typeof context.url === 'function') {
+                const frameUrl = context.url();
+                if (frameUrl) {
+                    return frameUrl;
+                }
+            }
+        } catch (error) {
+            // Ignore frame URL lookup failures.
+        }
+        return 'main';
     }
 
     async dismissPopups(page, attempts) {
@@ -572,12 +653,12 @@ class NodeJSWorker {
             );
             return response.data;
         } catch (error) {
-            console.error('Failed to send result:', error.message);
+            console.error(`Failed to send result: ${this.normalizeErrorMessage(error && error.message ? error.message : error)}`);
         }
     }
 
-    async startHealthCheck() {
-        setInterval(async () => {
+    startHealthCheck() {
+        this.healthCheckTimer = setInterval(async () => {
             try {
                 await this.redis.ping();
                 console.log(`Health check passed - Processing: ${this.processingCount}/${this.maxConcurrent}`);
@@ -589,6 +670,39 @@ class NodeJSWorker {
 
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    normalizeErrorMessage(rawMessage) {
+        const manualCheck = 'SILAHKAN LAKUKAN CHECK MANUAL';
+        const deadLink = 'This LINK ALREADY DEATH bruh';
+        const msg = String(rawMessage || '').toLowerCase();
+
+        if (
+            msg.includes('comment awaiting moderation') ||
+            msg.includes('injectbacklink error') ||
+            msg.includes('anchor text not found after submit') ||
+            msg.includes('net::err_http_response_code_failure') ||
+            msg.includes('net::err_cert_authority_invalid') ||
+            (msg.includes('page.goto') && msg.includes('timeout 60000ms exceeded'))
+        ) {
+            return deadLink;
+        }
+
+        if (
+            msg.includes('post-submit verification failed') ||
+            msg.includes('verification error') ||
+            msg.includes('no injection point') ||
+            msg.includes('json parse error') ||
+            msg.includes('invalid task structure') ||
+            msg.includes('queue processor error') ||
+            msg.includes('raw data received') ||
+            msg.includes('failed to move invalid data to error queue')
+        ) {
+            return manualCheck;
+        }
+
+        // All other runtime/raw errors default to manual check.
+        return manualCheck;
     }
 
     ensureActive() {
@@ -636,6 +750,10 @@ class NodeJSWorker {
     async stop() {
         this.isRunning = false;
         this.stopRequested = true;
+        if (this.healthCheckTimer) {
+            clearInterval(this.healthCheckTimer);
+            this.healthCheckTimer = null;
+        }
         await this.abortActivePages();
         
         if (this.browser) {
